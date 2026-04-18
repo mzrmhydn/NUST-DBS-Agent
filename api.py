@@ -79,7 +79,7 @@ def startup():
     global agent, few_shot_prompt, database, fewshot_vectorstore
 
     print("Loading database...", end=" ", flush=True)
-    database = SQLDatabase.from_uri("sqlite:///db/Chinook.db?mode=ro")
+    database = SQLDatabase.from_uri("sqlite:///db/NUST.db?mode=ro")
     print("OK")
 
     print("Loading LLM (llama3.1 via Ollama)...", end=" ", flush=True)

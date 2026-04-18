@@ -22,13 +22,22 @@ The code acts as a robust backend API (`api.py`) and a modern React GUI (`fronte
 
 Directory / File | Description
 :--- | :---
-`db` | Contains the Chinook sample database and the SQL script to re-create it.
+`db` | Contains the NUST database (`NUST.db`), its SQLite schema + seed script (`NUST.sql`), and the mermaid.js ERD (`ERD.mmd`).
 `examples` | Contains SQL examples used for few-shot prompting (JSON format).
 `prompts` | Contains prompt templates for the LLM.
 `img` | Contains images.
 `api.py` | FastAPI backend exposing LangGraph capabilities.
 `frontend/` | React (Vite + Tailwind v4) chat UI.
 `requirements.txt` | Python package dependencies.
+`Assignment_1_Phase_1_2.md` | Phase 1 & 2 deliverable (requirements, ER design, DDL, normalization).
+`Assignment_2_Phase_3.md` | Phase 3 deliverable (complex queries, triggers, procedures, indexes, transactions).
+
+### Rebuilding `db/NUST.db`
+The SQLite database file is committed, but can be regenerated from the SQL script at any time:
+
+```bash
+python -c "import sqlite3, os; os.path.exists('db/NUST.db') and os.remove('db/NUST.db'); sqlite3.connect('db/NUST.db').executescript(open('db/NUST.sql','r',encoding='utf-8').read())"
+```
 
 ## Prerequisites
 
@@ -94,4 +103,4 @@ cd frontend
 npm run dev
 ```
 
-Navigate to [http://localhost:5173/](http://localhost:5173/) to interact with your database.
+Navigate to [http://localhost:5173/](http://localhost:5173/) to interact with the NUST database through natural language.

@@ -1,298 +1,242 @@
+-- =============================================================================
+-- NUST University Database - Example Queries
+-- =============================================================================
+-- Mirrors the few-shot examples in examples.json. Demonstrates the common
+-- query patterns over the admissions + academic pipelines using the
+-- normalized schema (Student is 1:1 with Application; Course is owned by
+-- School and linked to Program via the M:N ProgramCourse junction).
+
 /*
-What is the most popular media type among all the tracks?
+Which program received the most applications?
 */
-SELECT 
-    MediaType.Name AS media_type,
-    COUNT(Track.TrackId) AS track_count
-FROM Track
-    INNER JOIN 
-        MediaType ON MediaType.MediaTypeId = Track.MediaTypeId
-GROUP BY Track.MediaTypeId
-ORDER BY track_count DESC
+SELECT
+    Program.ProgramName,
+    COUNT(Application.ApplicationID) AS application_count
+FROM Application
+INNER JOIN Program ON Program.ProgramID = Application.ProgramID
+GROUP BY Application.ProgramID
+ORDER BY application_count DESC
 LIMIT 5;
 
 /*
-What is the total price for the album 'Big Ones'?
+What is the average NET score per entry test series?
 */
-SELECT 
-    Album.Title AS album_title,
-    SUM(Track.UnitPrice) AS album_price
-FROM
-    Track
-    INNER JOIN
-        Album ON Album.AlbumId = Track.AlbumId
-WHERE
-    Album.Title = 'Big Ones'
-GROUP BY
-    Track.AlbumId;
+SELECT
+    EntryTest.SeriesName,
+    AVG(TestScore.Score) AS avg_score
+FROM TestScore
+INNER JOIN EntryTest ON EntryTest.TestID = TestScore.TestID
+GROUP BY TestScore.TestID
+ORDER BY avg_score DESC;
 
 /*
-Which tracks made the most in total sales?
+List all applicants who were selected for BSCS.
 */
-SELECT 
-    Track.Name AS track_name, 
-    SUM(
-        InvoiceLine.Quantity * InvoiceLine.UnitPrice
-    ) AS total_sales
-FROM
-    InvoiceLine
-    INNER JOIN
-        Track ON InvoiceLine.TrackId = Track.TrackId
-GROUP BY 
-    InvoiceLine.TrackId
-ORDER BY 
-    total_sales DESC
+SELECT
+    Applicant.FirstName || ' ' || Applicant.LastName AS applicant_name
+FROM Applicant
+INNER JOIN Application ON Application.ApplicantID = Applicant.ApplicantID
+INNER JOIN Program     ON Program.ProgramID       = Application.ProgramID
+WHERE Program.DegreeType = 'BSCS'
+  AND Application.Status IN ('Selected','Enrolled');
+
+/*
+How many students are enrolled in each program?
+(Student -> Application -> Program; Student has no direct ProgramID.)
+*/
+SELECT
+    Program.ProgramName,
+    COUNT(Student.StudentID) AS student_count
+FROM Student
+INNER JOIN Application ON Application.ApplicationID = Student.ApplicationID
+INNER JOIN Program     ON Program.ProgramID         = Application.ProgramID
+GROUP BY Program.ProgramID
+ORDER BY student_count DESC;
+
+/*
+What is the top 5 highest NET scores of all time?
+*/
+SELECT
+    Applicant.FirstName || ' ' || Applicant.LastName AS applicant_name,
+    EntryTest.SeriesName,
+    TestScore.Score
+FROM TestScore
+INNER JOIN Applicant ON Applicant.ApplicantID = TestScore.ApplicantID
+INNER JOIN EntryTest ON EntryTest.TestID      = TestScore.TestID
+ORDER BY TestScore.Score DESC
 LIMIT 5;
 
 /*
-Which tracks sold the most number of units?
+How many waitlisted applicants scored above 140 in the NET?
 */
-SELECT     
-    Track.Name,
-    SUM(InvoiceLine.Quantity) AS total_quantity
-FROM
-    InvoiceLine
-    INNER JOIN
-        Track ON Track.TrackId = InvoiceLine.TrackId
-GROUP BY
-    InvoiceLine.TrackId
-ORDER BY
-    total_quantity DESC
+SELECT COUNT(DISTINCT Applicant.ApplicantID) AS waitlisted_high_scorers
+FROM Applicant
+INNER JOIN Application ON Application.ApplicantID = Applicant.ApplicantID
+WHERE Application.Status = 'Waitlisted'
+  AND Applicant.ApplicantID IN (
+      SELECT TestScore.ApplicantID
+      FROM TestScore
+      WHERE TestScore.Score > 140
+  );
+
+/*
+Which school generated the most tuition revenue?
+(StudentFee -> Student -> Application -> Program -> School.)
+*/
+SELECT
+    School.Name AS school_name,
+    SUM(StudentFee.Amount) AS total_tuition
+FROM StudentFee
+INNER JOIN Student     ON Student.StudentID         = StudentFee.StudentID
+INNER JOIN Application ON Application.ApplicationID = Student.ApplicationID
+INNER JOIN Program     ON Program.ProgramID         = Application.ProgramID
+INNER JOIN School      ON School.SchoolID           = Program.SchoolID
+WHERE StudentFee.FeeType = 'Tuition'
+GROUP BY School.SchoolID
+ORDER BY total_tuition DESC
 LIMIT 5;
 
 /*
-What was the most purchased tracks of 2022?
+List all courses offered by the SEECS school.
+(Course is owned by School directly, no join through Program.)
 */
-SELECT 
-    InvoiceLine.TrackId AS track_id,
-    Track.Name AS track_name,
-    strftime('%Y', Invoice.InvoiceDate) AS invoice_year,
-    SUM(InvoiceLine.Quantity) AS total_quantity
-FROM
-    InvoiceLine
-    INNER JOIN
-        Invoice ON Invoice.InvoiceId = InvoiceLine.InvoiceId
-    INNER JOIN
-        Track ON Track.TrackId = InvoiceLine.TrackId
-WHERE
-    invoice_year = '2022'
-GROUP BY
-    InvoiceLine.TrackId
-ORDER BY
-    total_quantity DESC
+SELECT
+    Course.CourseCode,
+    Course.CourseName,
+    Course.Credits
+FROM Course
+INNER JOIN School ON School.SchoolID = Course.SchoolID
+WHERE School.Name = 'SEECS';
+
+/*
+Which courses are shared across multiple programs?
+(ProgramCourse junction demonstrates the M:N relationship.)
+*/
+SELECT
+    Course.CourseCode,
+    Course.CourseName,
+    COUNT(ProgramCourse.ProgramID) AS num_programs
+FROM Course
+INNER JOIN ProgramCourse ON ProgramCourse.CourseID = Course.CourseID
+GROUP BY Course.CourseID
+HAVING num_programs > 1
+ORDER BY num_programs DESC;
+
+/*
+Which instructor is teaching the most sections in Fall 2026?
+*/
+SELECT
+    Instructor.FirstName || ' ' || Instructor.LastName AS instructor_name,
+    COUNT(Section.SectionID) AS section_count
+FROM Section
+INNER JOIN Instructor ON Instructor.InstructorID = Section.InstructorID
+INNER JOIN Term       ON Term.TermID             = Section.TermID
+WHERE Term.TermName = 'Fall 2026'
+GROUP BY Section.InstructorID
+ORDER BY section_count DESC
 LIMIT 5;
 
 /*
-How many albums does 'Iron Maiden' have?
+List the full transcript (course, term, grade, status) for student Ali Khan.
+(Student -> Application -> Applicant for identity.)
 */
-SELECT 
-    Artist.Name AS artist_name,
-    COUNT(Album.AlbumId) AS album_count
-FROM
-    Album
-    INNER JOIN
-        Artist ON Artist.ArtistId = Album.ArtistId
-WHERE
-    Artist.Name = 'Iron Maiden'
-GROUP BY
-    Album.ArtistId;
+SELECT
+    Course.CourseCode,
+    Course.CourseName,
+    Term.TermName,
+    Enrollment.Grade,
+    Enrollment.Status
+FROM Enrollment
+INNER JOIN Student     ON Student.StudentID         = Enrollment.StudentID
+INNER JOIN Application ON Application.ApplicationID = Student.ApplicationID
+INNER JOIN Applicant   ON Applicant.ApplicantID     = Application.ApplicantID
+INNER JOIN Section     ON Section.SectionID         = Enrollment.SectionID
+INNER JOIN Course      ON Course.CourseID           = Section.CourseID
+INNER JOIN Term        ON Term.TermID               = Section.TermID
+WHERE Applicant.FirstName = 'Ali'
+  AND Applicant.LastName  = 'Khan'
+ORDER BY Term.StartDate;
 
 /*
-Find all albums for the artist 'AC/DC'.
+How many students are currently enrolled in 'Database Systems'?
 */
-SELECT 
-	Album.Title AS album_title,
-	Artist.Name AS artist_name
-FROM 
-	Album 
-	INNER JOIN
-		Artist ON Artist.ArtistId = Album.ArtistId
-WHERE 
-	Artist.Name = 'AC/DC';
+SELECT COUNT(Enrollment.EnrollmentID) AS enrollment_count
+FROM Enrollment
+INNER JOIN Section ON Section.SectionID = Enrollment.SectionID
+INNER JOIN Course  ON Course.CourseID   = Section.CourseID
+WHERE Course.CourseName = 'Database Systems';
 
 /*
-List all the tracks in the album with title 'Let There Be Rock'.
+Which applicants scored above the average score of the test series they took?
 */
-SELECT Track.Name
-FROM Track
-WHERE Track.AlbumId = (
-   SELECT Album.AlbumId
-   FROM Album
-   WHERE Album.Title = 'Let There Be Rock'
+SELECT
+    Applicant.FirstName || ' ' || Applicant.LastName AS applicant_name,
+    EntryTest.SeriesName,
+    TestScore.Score
+FROM TestScore
+INNER JOIN Applicant ON Applicant.ApplicantID = TestScore.ApplicantID
+INNER JOIN EntryTest ON EntryTest.TestID      = TestScore.TestID
+WHERE TestScore.Score > (
+    SELECT AVG(ts2.Score) FROM TestScore ts2 WHERE ts2.TestID = TestScore.TestID
 );
 
 /*
-How many tracks are there in the album 'Big Ones'?
-*/
-SELECT 
-	Album.Title AS album_title,
-	COUNT(Track.TrackId) AS track_count
-FROM 
-	Track
-	INNER JOIN
-		Album ON Album.AlbumId = Track.AlbumId
-WHERE 
-    Album.Title = 'Big Ones';
-
-/*
-List 10 tracks in the 'Rock' genre.
-*/
-SELECT 
-    Track.Name
-FROM Track
-    INNER JOIN 
-        Genre ON Genre.GenreId = Track.GenreId
-WHERE 
-    Genre.Name = 'Rock' 
-LIMIT 10;
-
-/*
-Which tracks are added to the most number of playlists?
-*/
-SELECT 
-    Track.Name AS track_name,
-    COUNT(Track.TrackId) AS track_count
-FROM 
-    PlaylistTrack
-    INNER JOIN
-        Playlist ON Playlist.PlaylistId = PlaylistTrack.PlaylistId
-    INNER JOIN
-        Track ON Track.TrackId = PlaylistTrack.TrackId
-GROUP BY
-    Track.TrackId
-ORDER BY
-    track_count DESC
-LIMIT 5;
-
-/*
-List all customers from Canada.
-*/
-SELECT 
-    CONCAT(
-        Customer.FirstName, ' ', Customer.LastName
-    ) AS full_name
-FROM 
-    Customer 
-WHERE 
-    Customer.Country = 'Canada';
-
-/*
-Which country's customers spent the most?
-*/
-SELECT 
-    Customer.Country,
-    SUM(Invoice.Total) AS total_spent
-FROM
-    Invoice
-    INNER JOIN
-        Customer ON Customer.CustomerId = Invoice.CustomerId
-GROUP BY
-    Customer.Country
-ORDER BY
-    total_spent DESC
-LIMIT 5;
-
-/*
-Who are the top 5 customers by total purchase?
-*/
-SELECT 
-    CONCAT(
-        Customer.FirstName, ' ', Customer.LastName
-    ) AS full_name,
-    Customer.Country,
-    SUM(Invoice.Total) AS total_purchase
-FROM
-    Invoice
-    INNER JOIN
-        Customer ON Customer.CustomerId = Invoice.CustomerId
-GROUP BY Invoice.CustomerId
-ORDER BY total_purchase DESC
-LIMIT 5;
-
-/*
-Which employees made the most in sales?
-*/
-SELECT 
-    CONCAT(
-        Employee.FirstName, ' ', Employee.LastName
-    ) AS full_name,
-    Employee.Title AS job_title,
-    SUM(Invoice.Total) AS total_sales_made
-FROM
-    Employee
-    INNER JOIN
-        Customer ON Customer.SupportRepId = Employee.EmployeeId
-    INNER JOIN
-        Invoice ON Invoice.CustomerId = Customer.CustomerId
-GROUP BY
-    Employee.EmployeeId
-ORDER BY
-    total_sales_made DESC
-LIMIT 5;
-
-/*
-Which employee made the most in sales in the year 2021?
-*/
-SELECT 
-    CONCAT(
-        Employee.FirstName, ' ', Employee.LastName
-    ) AS full_name,
-    Employee.Title AS job_title,
-    strftime('%Y', Invoice.InvoiceDate) AS invoice_year,
-    SUM(Invoice.Total) AS total_sales_made
-FROM
-    Employee
-    INNER JOIN
-        Customer ON Customer.SupportRepId = Employee.EmployeeId
-    INNER JOIN
-        Invoice ON Invoice.CustomerId = Customer.CustomerId
-WHERE 
-    invoice_year = '2021'
-GROUP BY
-    Employee.EmployeeId
-ORDER BY
-    total_sales_made DESC
-LIMIT 5;
-
-/*
-List all the managers and their direct report.
-*/
-SELECT 
-	M.FirstName || ' ' || M.LastName AS manager,
-	M.Title AS manager_title,
-	E.FirstName || ' ' || E.LastName AS direct_report,
-	E.Title AS employee_title
-FROM 
-	Employee AS E
-	INNER JOIN 
-		Employee AS M ON M.EmployeeId = E.ReportsTo
-ORDER BY 
-	manager ASC;
-
-/*
-Who directly reports to the General Manager?
-*/
-SELECT 
-	M.FirstName || ' ' || M.LastName AS manager,
-	M.Title AS manager_title,
-	E.FirstName || ' ' || E.LastName AS direct_report,
-	E.Title AS employee_title
-FROM 
-	Employee AS E
-	INNER JOIN 
-		Employee AS M ON M.EmployeeId = E.ReportsTo
-WHERE
-    M.Title = 'General Manager';
-
-/*
-Which employees work in the city Calgary?
+What is the conversion rate (applicants to students) for each school?
 */
 SELECT
-	Employee.FirstName || ' ' || Employee.LastName 
-        AS full_name,
-	Employee.City,
-	Employee.Title
-FROM
-	Employee
-WHERE
-	Employee.City = 'Calgary';
+    School.Name AS school_name,
+    COUNT(DISTINCT Application.ApplicantID) AS total_applicants,
+    COUNT(DISTINCT Student.StudentID)       AS converted_students
+FROM School
+INNER JOIN Program     ON Program.SchoolID        = School.SchoolID
+LEFT  JOIN Application ON Application.ProgramID   = Program.ProgramID
+LEFT  JOIN Student     ON Student.ApplicationID   = Application.ApplicationID
+GROUP BY School.SchoolID;
+
+/*
+Show students with CGPA above 3.5.
+*/
+SELECT
+    Applicant.FirstName || ' ' || Applicant.LastName AS student_name,
+    Program.ProgramName,
+    Student.CGPA
+FROM Student
+INNER JOIN Application ON Application.ApplicationID = Student.ApplicationID
+INNER JOIN Applicant   ON Applicant.ApplicantID     = Application.ApplicantID
+INNER JOIN Program     ON Program.ProgramID         = Application.ProgramID
+WHERE Student.CGPA > 3.5
+ORDER BY Student.CGPA DESC;
+
+/*
+Which courses have no sections offered in Fall 2026?
+*/
+SELECT
+    Course.CourseCode,
+    Course.CourseName
+FROM Course
+LEFT JOIN Section ON Section.CourseID = Course.CourseID
+   AND Section.TermID = (SELECT Term.TermID FROM Term WHERE Term.TermName = 'Fall 2026')
+WHERE Section.SectionID IS NULL;
+
+/*
+How much total application fee revenue came from the 2026 intake?
+*/
+SELECT SUM(ApplicationFee.Amount) AS total_fees
+FROM ApplicationFee
+WHERE strftime('%Y', ApplicationFee.PaymentDate) = '2026';
+
+/*
+Which core courses does the BSCS program require in its first two semesters?
+(Program <-> Course M:N via ProgramCourse.)
+*/
+SELECT
+    Course.CourseCode,
+    Course.CourseName,
+    ProgramCourse.Semester
+FROM ProgramCourse
+INNER JOIN Course  ON Course.CourseID  = ProgramCourse.CourseID
+INNER JOIN Program ON Program.ProgramID = ProgramCourse.ProgramID
+WHERE Program.DegreeType = 'BSCS'
+  AND ProgramCourse.CourseType = 'Core'
+  AND ProgramCourse.Semester <= 2
+ORDER BY ProgramCourse.Semester;

@@ -1,0 +1,164 @@
+%% NUST University Database - Entity Relationship Diagram
+%% Rendered with Mermaid.js - paste into https://mermaid.live to view
+%%
+%% Relationship notation (Crow's Foot):
+%%   ||--o{  one to zero-or-many        (1 : 0..*)
+%%   ||--|{  one to one-or-many         (1 : 1..*) -- mandatory many
+%%   ||--o|  one to zero-or-one         (1 : 0..1) -- optional one
+%%   ||--||  one to exactly one         (1 : 1)
+%%   }o--o{  many to many               (0..* : 0..*) -- via junction
+%%
+%% PIPELINES
+%%   ADMISSIONS : School -> Program -> Application <- Applicant -> TestScore <- EntryTest
+%%                                          ApplicationFee -> Application
+%%   BRIDGE     : Application (1) -> Student (0..1)   -- an accepted Application
+%%                                                       produces exactly one Student
+%%   ACADEMIC   : Student -> Enrollment <- Section -> (Course / Term / Instructor / Classroom)
+%%                Program <-> Course  via ProgramCourse (M:N with Core/Elective + Semester)
+%%
+%% Student carries ONLY ApplicationID. Applicant and Program are reached via
+%% Application, so the admissions record is the single source of truth.
+
+erDiagram
+    SCHOOL ||--|{ PROGRAM    : "offers"
+    SCHOOL ||--o{ INSTRUCTOR : "employs"
+    SCHOOL ||--o{ CLASSROOM  : "contains"
+    SCHOOL ||--o{ COURSE     : "owns"
+
+    APPLICANT ||--o{ TESTSCORE   : "earns"
+    APPLICANT ||--o{ APPLICATION : "submits"
+    ENTRYTEST ||--o{ TESTSCORE   : "graded as"
+
+    PROGRAM ||--o{ APPLICATION   : "receives"
+    PROGRAM }o--o{ COURSE        : "curriculum (ProgramCourse)"
+
+    APPLICATION ||--o| STUDENT        : "accepted -> becomes"
+    APPLICATION ||--o| APPLICATIONFEE : "processing fee"
+
+    STUDENT ||--o{ STUDENTFEE : "tuition / hostel / library"
+    STUDENT ||--o{ ENROLLMENT : "registers"
+
+    COURSE     ||--o{ SECTION    : "offered as"
+    TERM       ||--o{ SECTION    : "scheduled in"
+    INSTRUCTOR ||--o{ SECTION    : "teaches"
+    CLASSROOM  ||--o{ SECTION    : "hosted in"
+    SECTION    ||--o{ ENROLLMENT : "roster of"
+
+    PROGRAM       ||--o{ PROGRAMCOURSE : "has"
+    COURSE        ||--o{ PROGRAMCOURSE : "listed in"
+
+    SCHOOL {
+        int    SchoolID PK
+        string Name UK
+        string Location
+        int    EstablishedYear
+    }
+    PROGRAM {
+        int    ProgramID PK
+        int    SchoolID FK
+        string ProgramName
+        string DegreeType
+        int    DurationYears
+        int    TotalSeats
+    }
+    APPLICANT {
+        int    ApplicantID PK
+        string FirstName
+        string LastName
+        string Email UK
+        string Phone
+        date   DOB
+        int    HighSchoolMarks
+        string City
+    }
+    ENTRYTEST {
+        int    TestID PK
+        string SeriesName UK
+        date   TestDate
+        string TestType
+    }
+    TESTSCORE {
+        int    TestScoreID PK
+        int    ApplicantID FK
+        int    TestID FK
+        int    Score
+    }
+    APPLICATION {
+        int    ApplicationID PK
+        int    ApplicantID FK
+        int    ProgramID FK
+        date   ApplicationDate
+        int    Preference
+        string Status
+    }
+    STUDENT {
+        int    StudentID PK
+        int    ApplicationID FK "UNIQUE"
+        date   EnrollmentDate
+        real   CGPA
+        string Status
+    }
+    APPLICATIONFEE {
+        int     ApplicationID PK "FK"
+        numeric Amount
+        date    PaymentDate
+        string  Method
+    }
+    STUDENTFEE {
+        int     FeeID PK
+        int     StudentID FK
+        numeric Amount
+        date    PaymentDate
+        string  FeeType
+        string  Method
+    }
+    INSTRUCTOR {
+        int    InstructorID PK
+        int    SchoolID FK
+        string FirstName
+        string LastName
+        string Title
+        string Email UK
+        date   HireDate
+    }
+    COURSE {
+        int    CourseID PK
+        int    SchoolID FK
+        string CourseCode UK
+        string CourseName
+        int    Credits
+    }
+    PROGRAMCOURSE {
+        int    ProgramID PK "FK"
+        int    CourseID  PK "FK"
+        string CourseType
+        int    Semester
+    }
+    TERM {
+        int    TermID PK
+        string TermName UK
+        date   StartDate
+        date   EndDate
+    }
+    CLASSROOM {
+        int    ClassroomID PK
+        int    SchoolID FK
+        string RoomNumber
+        int    Capacity
+        string RoomType
+    }
+    SECTION {
+        int    SectionID PK
+        int    CourseID FK
+        int    TermID FK
+        int    InstructorID FK
+        int    ClassroomID FK
+        string SectionName
+    }
+    ENROLLMENT {
+        int    EnrollmentID PK
+        int    StudentID FK
+        int    SectionID FK
+        string Grade
+        string Status
+    }

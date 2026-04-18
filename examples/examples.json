@@ -1,78 +1,86 @@
 [
     {
-        "question": "What is the most popular media type among all the tracks?",
-        "query": "SELECT MediaType.Name AS media_type, COUNT(Track.TrackId) AS track_count FROM Track INNER JOIN MediaType ON MediaType.MediaTypeId = Track.MediaTypeId GROUP BY Track.MediaTypeId ORDER BY track_count DESC LIMIT 5;"
+        "question": "Which program received the most applications?",
+        "query": "SELECT Program.ProgramName, COUNT(Application.ApplicationID) AS application_count FROM Application INNER JOIN Program ON Program.ProgramID = Application.ProgramID GROUP BY Application.ProgramID ORDER BY application_count DESC LIMIT 5;"
     },
     {
-        "question": "What is the total price for the album 'Big Ones'?",
-        "query": "SELECT Album.Title AS album_title, SUM(Track.UnitPrice) AS album_price FROM Track INNER JOIN Album ON Album.AlbumId = Track.AlbumId WHERE Album.Title = 'Big Ones' GROUP BY Track.AlbumId;"
+        "question": "What is the average NET score per entry test series?",
+        "query": "SELECT EntryTest.SeriesName, AVG(TestScore.Score) AS avg_score FROM TestScore INNER JOIN EntryTest ON EntryTest.TestID = TestScore.TestID GROUP BY TestScore.TestID ORDER BY avg_score DESC;"
     },
     {
-        "question": "Which tracks made the most in total sales?",
-        "query": "SELECT Track.Name AS track_name, SUM( InvoiceLine.Quantity * InvoiceLine.UnitPrice ) AS total_sales FROM InvoiceLine INNER JOIN Track ON InvoiceLine.TrackId = Track.TrackId GROUP BY InvoiceLine.TrackId ORDER BY total_sales DESC LIMIT 5;"
+        "question": "List all applicants who were selected for BSCS.",
+        "query": "SELECT Applicant.FirstName || ' ' || Applicant.LastName AS applicant_name FROM Applicant INNER JOIN Application ON Application.ApplicantID = Applicant.ApplicantID INNER JOIN Program ON Program.ProgramID = Application.ProgramID WHERE Program.DegreeType = 'BSCS' AND Application.Status IN ('Selected','Enrolled');"
     },
     {
-        "question": "Which tracks sold the most number of units?",
-        "query": "SELECT Track.Name, SUM(InvoiceLine.Quantity) AS total_quantity FROM InvoiceLine INNER JOIN Track ON Track.TrackId = InvoiceLine.TrackId GROUP BY InvoiceLine.TrackId ORDER BY total_quantity DESC LIMIT 5;"
+        "question": "How many students are enrolled in each program?",
+        "query": "SELECT Program.ProgramName, COUNT(Student.StudentID) AS student_count FROM Student INNER JOIN Application ON Application.ApplicationID = Student.ApplicationID INNER JOIN Program ON Program.ProgramID = Application.ProgramID GROUP BY Program.ProgramID ORDER BY student_count DESC;"
     },
     {
-        "question": "What was the most purchased tracks of 2022?",
-        "query": "SELECT InvoiceLine.TrackId AS track_id, Track.Name AS track_name, strftime('%Y', Invoice.InvoiceDate) AS invoice_year, SUM(InvoiceLine.Quantity) AS total_quantity FROM InvoiceLine INNER JOIN Invoice ON Invoice.InvoiceId = InvoiceLine.InvoiceId INNER JOIN Track ON Track.TrackId = InvoiceLine.TrackId WHERE invoice_year = '2022' GROUP BY InvoiceLine.TrackId ORDER BY total_quantity DESC LIMIT 5;"
+        "question": "What is the top 5 highest NET scores of all time?",
+        "query": "SELECT Applicant.FirstName || ' ' || Applicant.LastName AS applicant_name, EntryTest.SeriesName, TestScore.Score FROM TestScore INNER JOIN Applicant ON Applicant.ApplicantID = TestScore.ApplicantID INNER JOIN EntryTest ON EntryTest.TestID = TestScore.TestID ORDER BY TestScore.Score DESC LIMIT 5;"
     },
     {
-        "question": "How many albums does 'Iron Maiden' have?",
-        "query": "SELECT Artist.Name AS artist_name, COUNT(Album.AlbumId) AS album_count FROM Album INNER JOIN Artist ON Artist.ArtistId = Album.ArtistId WHERE Artist.Name = 'Iron Maiden' GROUP BY Album.ArtistId;"
+        "question": "How many waitlisted applicants scored above 140 in the NET?",
+        "query": "SELECT COUNT(DISTINCT Applicant.ApplicantID) AS waitlisted_high_scorers FROM Applicant INNER JOIN Application ON Application.ApplicantID = Applicant.ApplicantID WHERE Application.Status = 'Waitlisted' AND Applicant.ApplicantID IN (SELECT TestScore.ApplicantID FROM TestScore WHERE TestScore.Score > 140);"
     },
     {
-        "question": "Find all albums for the artist 'AC/DC'.",
-        "query": "SELECT Album.Title AS album_title, Artist.Name AS artist_name FROM Album INNER JOIN Artist ON Artist.ArtistId = Album.ArtistId WHERE Artist.Name = 'AC/DC';"
+        "question": "Which school generated the most tuition revenue?",
+        "query": "SELECT School.Name AS school_name, SUM(StudentFee.Amount) AS total_tuition FROM StudentFee INNER JOIN Student ON Student.StudentID = StudentFee.StudentID INNER JOIN Application ON Application.ApplicationID = Student.ApplicationID INNER JOIN Program ON Program.ProgramID = Application.ProgramID INNER JOIN School ON School.SchoolID = Program.SchoolID WHERE StudentFee.FeeType = 'Tuition' GROUP BY School.SchoolID ORDER BY total_tuition DESC LIMIT 5;"
     },
     {
-        "question": "List all the tracks in the album with title 'Let There Be Rock'.",
-        "query": "SELECT Track.Name FROM Track WHERE Track.AlbumId = ( SELECT Album.AlbumId FROM Album WHERE Album.Title = 'Let There Be Rock' );"
+        "question": "List all courses offered by the SEECS school.",
+        "query": "SELECT Course.CourseCode, Course.CourseName, Course.Credits FROM Course INNER JOIN School ON School.SchoolID = Course.SchoolID WHERE School.Name = 'SEECS';"
     },
     {
-        "question": "How many tracks are there in the album 'Big Ones'?",
-        "query": "SELECT Album.Title AS album_title, COUNT(Track.TrackId) AS track_count FROM Track INNER JOIN Album ON Album.AlbumId = Track.AlbumId WHERE Album.Title = 'Big Ones';"
+        "question": "Which courses are shared across multiple programs?",
+        "query": "SELECT Course.CourseCode, Course.CourseName, COUNT(ProgramCourse.ProgramID) AS num_programs FROM Course INNER JOIN ProgramCourse ON ProgramCourse.CourseID = Course.CourseID GROUP BY Course.CourseID HAVING num_programs > 1 ORDER BY num_programs DESC;"
     },
     {
-        "question": "List 10 tracks in the 'Rock' genre.",
-        "query": "SELECT Track.Name FROM Track INNER JOIN Genre ON Genre.GenreId = Track.GenreId WHERE Genre.Name = 'Rock' LIMIT 10;"
+        "question": "Which instructor is teaching the most sections in Fall 2026?",
+        "query": "SELECT Instructor.FirstName || ' ' || Instructor.LastName AS instructor_name, COUNT(Section.SectionID) AS section_count FROM Section INNER JOIN Instructor ON Instructor.InstructorID = Section.InstructorID INNER JOIN Term ON Term.TermID = Section.TermID WHERE Term.TermName = 'Fall 2026' GROUP BY Section.InstructorID ORDER BY section_count DESC LIMIT 5;"
     },
     {
-        "question": "Which tracks are added to the most number of playlists?",
-        "query": "SELECT Track.Name AS track_name, COUNT(Track.TrackId) AS track_count FROM PlaylistTrack INNER JOIN Playlist ON Playlist.PlaylistId = PlaylistTrack.PlaylistId INNER JOIN Track ON Track.TrackId = PlaylistTrack.TrackId GROUP BY Track.TrackId ORDER BY track_count DESC LIMIT 5;"
+        "question": "List the full transcript (course, term, grade) for student Ali Khan.",
+        "query": "SELECT Course.CourseCode, Course.CourseName, Term.TermName, Enrollment.Grade, Enrollment.Status FROM Enrollment INNER JOIN Student ON Student.StudentID = Enrollment.StudentID INNER JOIN Application ON Application.ApplicationID = Student.ApplicationID INNER JOIN Applicant ON Applicant.ApplicantID = Application.ApplicantID INNER JOIN Section ON Section.SectionID = Enrollment.SectionID INNER JOIN Course ON Course.CourseID = Section.CourseID INNER JOIN Term ON Term.TermID = Section.TermID WHERE Applicant.FirstName = 'Ali' AND Applicant.LastName = 'Khan' ORDER BY Term.StartDate;"
     },
     {
-        "question": "List all customers from Canada.",
-        "query": "SELECT CONCAT( Customer.FirstName, ' ', Customer.LastName ) AS full_name FROM Customer WHERE Customer.Country = 'Canada';"
+        "question": "How many students are currently enrolled in 'Database Systems'?",
+        "query": "SELECT COUNT(Enrollment.EnrollmentID) AS enrollment_count FROM Enrollment INNER JOIN Section ON Section.SectionID = Enrollment.SectionID INNER JOIN Course ON Course.CourseID = Section.CourseID WHERE Course.CourseName = 'Database Systems';"
     },
     {
-        "question": "Which country's customers spent the most?",
-        "query": "SELECT Customer.Country, SUM(Invoice.Total) AS total_spent FROM Invoice INNER JOIN Customer ON Customer.CustomerId = Invoice.CustomerId GROUP BY Customer.Country ORDER BY total_spent DESC LIMIT 5;"
+        "question": "Which applicants scored above the average score of the test series they took?",
+        "query": "SELECT Applicant.FirstName || ' ' || Applicant.LastName AS applicant_name, EntryTest.SeriesName, TestScore.Score FROM TestScore INNER JOIN Applicant ON Applicant.ApplicantID = TestScore.ApplicantID INNER JOIN EntryTest ON EntryTest.TestID = TestScore.TestID WHERE TestScore.Score > (SELECT AVG(ts2.Score) FROM TestScore ts2 WHERE ts2.TestID = TestScore.TestID);"
     },
     {
-        "question": "Who are the top 5 customers by total purchase?",
-        "query": "SELECT CONCAT( Customer.FirstName, ' ', Customer.LastName ) AS full_name, Customer.Country, SUM(Invoice.Total) AS total_purchase FROM Invoice INNER JOIN Customer ON Customer.CustomerId = Invoice.CustomerId GROUP BY Invoice.CustomerId ORDER BY total_purchase DESC LIMIT 5;"
+        "question": "What is the conversion rate (applicants to students) for each school?",
+        "query": "SELECT School.Name AS school_name, COUNT(DISTINCT Application.ApplicantID) AS total_applicants, COUNT(DISTINCT Student.StudentID) AS converted_students FROM School INNER JOIN Program ON Program.SchoolID = School.SchoolID LEFT JOIN Application ON Application.ProgramID = Program.ProgramID LEFT JOIN Student ON Student.ApplicationID = Application.ApplicationID GROUP BY School.SchoolID;"
     },
     {
-        "question": "Which employees made the most in sales?",
-        "query": "SELECT CONCAT( Employee.FirstName, ' ', Employee.LastName ) AS full_name, Employee.Title AS job_title, SUM(Invoice.Total) AS total_sales_made FROM Employee INNER JOIN Customer ON Customer.SupportRepId = Employee.EmployeeId INNER JOIN Invoice ON Invoice.CustomerId = Customer.CustomerId GROUP BY Employee.EmployeeId ORDER BY total_sales_made DESC LIMIT 5;"
+        "question": "Show the students with CGPA above 3.5.",
+        "query": "SELECT Applicant.FirstName || ' ' || Applicant.LastName AS student_name, Program.ProgramName, Student.CGPA FROM Student INNER JOIN Application ON Application.ApplicationID = Student.ApplicationID INNER JOIN Applicant ON Applicant.ApplicantID = Application.ApplicantID INNER JOIN Program ON Program.ProgramID = Application.ProgramID WHERE Student.CGPA > 3.5 ORDER BY Student.CGPA DESC;"
     },
     {
-        "question": "Which employee made the most in sales in the year 2021?",
-        "query": "SELECT CONCAT( Employee.FirstName, ' ', Employee.LastName ) AS full_name, Employee.Title AS job_title, strftime('%Y', Invoice.InvoiceDate) AS invoice_year, SUM(Invoice.Total) AS total_sales_made FROM Employee INNER JOIN Customer ON Customer.SupportRepId = Employee.EmployeeId INNER JOIN Invoice ON Invoice.CustomerId = Customer.CustomerId WHERE invoice_year = '2021' GROUP BY Employee.EmployeeId ORDER BY total_sales_made DESC LIMIT 5;"
+        "question": "Which classrooms are over-utilized (hosting more than 2 sections)?",
+        "query": "SELECT Classroom.RoomNumber, School.Name AS school_name, COUNT(Section.SectionID) AS sections_hosted FROM Classroom INNER JOIN School ON School.SchoolID = Classroom.SchoolID LEFT JOIN Section ON Section.ClassroomID = Classroom.ClassroomID GROUP BY Classroom.ClassroomID HAVING sections_hosted > 2 ORDER BY sections_hosted DESC;"
     },
     {
-        "question": "List all the managers and their direct report.",
-        "query": "SELECT M.FirstName || ' ' || M.LastName AS manager, M.Title AS manager_title, E.FirstName || ' ' || E.LastName AS direct_report, E.Title AS employee_title FROM Employee AS E INNER JOIN Employee AS M ON M.EmployeeId = E.ReportsTo ORDER BY manager ASC;"
+        "question": "List all applicants from Lahore.",
+        "query": "SELECT Applicant.FirstName || ' ' || Applicant.LastName AS applicant_name, Applicant.Email FROM Applicant WHERE Applicant.City = 'Lahore';"
     },
     {
-        "question": "Who directly reports to the General Manager?",
-        "query": "SELECT M.FirstName || ' ' || M.LastName AS manager, M.Title AS manager_title, E.FirstName || ' ' || E.LastName AS direct_report, E.Title AS employee_title FROM Employee AS E INNER JOIN Employee AS M ON M.EmployeeId = E.ReportsTo WHERE M.Title = 'General Manager';"
+        "question": "Which students have never paid a tuition fee?",
+        "query": "SELECT Applicant.FirstName || ' ' || Applicant.LastName AS student_name FROM Student INNER JOIN Application ON Application.ApplicationID = Student.ApplicationID INNER JOIN Applicant ON Applicant.ApplicantID = Application.ApplicantID WHERE Student.StudentID NOT IN (SELECT StudentFee.StudentID FROM StudentFee WHERE StudentFee.FeeType = 'Tuition');"
     },
     {
-        "question": "Which employees work in the city Calgary?",
-        "query": "SELECT Employee.FirstName || ' ' || Employee.LastName AS full_name, Employee.City, Employee.Title FROM Employee WHERE Employee.City = 'Calgary';"
+        "question": "Which courses have no sections offered in Fall 2026?",
+        "query": "SELECT Course.CourseCode, Course.CourseName FROM Course LEFT JOIN Section ON Section.CourseID = Course.CourseID AND Section.TermID = (SELECT Term.TermID FROM Term WHERE Term.TermName = 'Fall 2026') WHERE Section.SectionID IS NULL;"
+    },
+    {
+        "question": "How much total application fee revenue came from the 2026 intake?",
+        "query": "SELECT SUM(ApplicationFee.Amount) AS total_fees FROM ApplicationFee WHERE strftime('%Y', ApplicationFee.PaymentDate) = '2026';"
+    },
+    {
+        "question": "Which core courses does the BSCS program require in its first two semesters?",
+        "query": "SELECT Course.CourseCode, Course.CourseName, ProgramCourse.Semester FROM ProgramCourse INNER JOIN Course ON Course.CourseID = ProgramCourse.CourseID INNER JOIN Program ON Program.ProgramID = ProgramCourse.ProgramID WHERE Program.DegreeType = 'BSCS' AND ProgramCourse.CourseType = 'Core' AND ProgramCourse.Semester <= 2 ORDER BY ProgramCourse.Semester;"
     }
 ]
