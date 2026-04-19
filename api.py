@@ -79,7 +79,16 @@ def startup():
     global agent, few_shot_prompt, database, fewshot_vectorstore
 
     print("Loading database...", end=" ", flush=True)
-    database = SQLDatabase.from_uri("sqlite:///db/Chinook.db?mode=ro")
+    mysql_user = os.getenv("MYSQL_USER", "root")
+    mysql_password = os.getenv("MYSQL_PASSWORD", "")
+    mysql_host = os.getenv("MYSQL_HOST", "localhost")
+    mysql_port = os.getenv("MYSQL_PORT", "3306")
+    mysql_db = os.getenv("MYSQL_DB", "nust_university")
+    mysql_uri = (
+        f"mysql+pymysql://{mysql_user}:{mysql_password}"
+        f"@{mysql_host}:{mysql_port}/{mysql_db}"
+    )
+    database = SQLDatabase.from_uri(mysql_uri)
     print("OK")
 
     print("Loading LLM (llama3.1 via Ollama)...", end=" ", flush=True)

@@ -22,13 +22,32 @@ The code acts as a robust backend API (`api.py`) and a modern React GUI (`fronte
 
 Directory / File | Description
 :--- | :---
-`db` | Contains the Chinook sample database and the SQL script to re-create it.
+`db` | Contains the NUST MySQL schema + seed script (`NUST.sql`) and the mermaid.js ERD (`ERD.mmd`).
 `examples` | Contains SQL examples used for few-shot prompting (JSON format).
 `prompts` | Contains prompt templates for the LLM.
 `img` | Contains images.
 `api.py` | FastAPI backend exposing LangGraph capabilities.
 `frontend/` | React (Vite + Tailwind v4) chat UI.
 `requirements.txt` | Python package dependencies.
+`Assignment_1_Phase_1_2.md` | Phase 1 & 2 deliverable (requirements, ER design, DDL, normalization).
+`Assignment_2_Phase_3.md` | Phase 3 deliverable (complex queries, triggers, procedures, indexes, transactions).
+
+### Building the MySQL database
+The schema and seed data live in [db/NUST.sql](db/NUST.sql). Load it into a running MySQL 8.0+ instance:
+
+```bash
+mysql -u root -p < db/NUST.sql
+```
+
+The script starts with `DROP DATABASE IF EXISTS nust_university; CREATE DATABASE nust_university; USE nust_university;` so it is safe to rerun. Configure the API connection via environment variables:
+
+```dotenv
+MYSQL_HOST=localhost
+MYSQL_PORT=3306
+MYSQL_USER=root
+MYSQL_PASSWORD=your-password
+MYSQL_DB=nust_university
+```
 
 ## Prerequisites
 
@@ -94,4 +113,4 @@ cd frontend
 npm run dev
 ```
 
-Navigate to [http://localhost:5173/](http://localhost:5173/) to interact with your database.
+Navigate to [http://localhost:5173/](http://localhost:5173/) to interact with the NUST database through natural language.
