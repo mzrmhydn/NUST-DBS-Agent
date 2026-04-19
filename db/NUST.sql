@@ -26,10 +26,13 @@
 SET NAMES utf8mb4;
 SET FOREIGN_KEY_CHECKS = 0;
 
-DROP TRIGGER IF EXISTS AutoUpdateApplicationStatus;
-DROP TRIGGER IF EXISTS EnforceClassCapacity;
-DROP VIEW  IF EXISTS ClassroomUtilization;
-DROP VIEW  IF EXISTS StudentTranscript;
+DROP PROCEDURE IF EXISTS GenerateTuitionChallan;
+DROP PROCEDURE IF EXISTS AcceptAdmission;
+DROP FUNCTION  IF EXISTS IsEligibleForEngineering;
+DROP TRIGGER   IF EXISTS AutoUpdateApplicationStatus;
+DROP TRIGGER   IF EXISTS EnforceClassCapacity;
+DROP VIEW      IF EXISTS ClassroomUtilization;
+DROP VIEW      IF EXISTS StudentTranscript;
 DROP TABLE IF EXISTS Enrollment;
 DROP TABLE IF EXISTS Section;
 DROP TABLE IF EXISTS Classroom;
@@ -708,3 +711,105 @@ FROM Classroom cr
 JOIN School sch ON sch.SchoolID = cr.SchoolID
 LEFT JOIN Section sec ON sec.ClassroomID = cr.ClassroomID
 GROUP BY cr.ClassroomID, sch.Name, cr.RoomNumber, cr.Capacity, cr.RoomType;
+
+-- =============================================================================
+-- STORED PROCEDURES AND FUNCTIONS
+-- =============================================================================
+
+DELIMITER //
+
+-- Procedure 1: Record a tuition payment for a given student.
+-- The unified Fee ledger's XOR CHECK requires ApplicationID IS NULL for
+-- non-Application fees, so we always pass NULL explicitly.
+CREATE PROCEDURE GenerateTuitionChallan(
+    IN p_student_id INT,
+    IN p_amount     DECIMAL(10, 2)
+)
+BEGIN
+    INSERT INTO Fee (ApplicationID, StudentID, FeeType, Amount, PaymentDate, Method)
+    VALUES (NULL, p_student_id, 'Tuition', p_amount, CURDATE(), 'Bank');
+END //
+
+-- Procedure 2: Atomically accept an admission offer.
+--   1. Create the Student row (fires AutoUpdateApplicationStatus,
+--      promoting the Application from 'Selected' to 'Enrolled').
+--   2. Record the first tuition payment against the new Student.
+-- The whole thing is wrapped in a transaction; any failure rolls back.
+CREATE PROCEDURE AcceptAdmission(
+    IN p_application_id   INT,
+    IN p_enrollment_date  DATE,
+    IN p_tuition_amount   DECIMAL(10, 2)
+)
+BEGIN
+    DECLARE v_student_id INT;
+
+    DECLARE EXIT HANDLER FOR SQLEXCEPTION
+    BEGIN
+        ROLLBACK;
+        RESIGNAL;
+    END;
+
+    START TRANSACTION;
+
+    INSERT INTO Student (ApplicationID, EnrollmentDate, CGPA, Status)
+    VALUES (p_application_id, p_enrollment_date, 0.00, 'Active');
+
+    SET v_student_id = LAST_INSERT_ID();
+
+    INSERT INTO Fee (ApplicationID, StudentID, FeeType, Amount, PaymentDate, Method)
+    VALUES (NULL, v_student_id, 'Tuition', p_tuition_amount, p_enrollment_date, 'Bank');
+
+    COMMIT;
+END //
+
+-- Function 1: Is this applicant eligible for an Engineering program?
+-- Eligibility = scored >= 140 on at least one Engineering NET.
+CREATE FUNCTION IsEligibleForEngineering(p_applicant_id INT)
+RETURNS BOOLEAN
+READS SQL DATA
+DETERMINISTIC
+BEGIN
+    DECLARE v_max_score INT;
+
+    SELECT MAX(ts.Score) INTO v_max_score
+      FROM TestScore ts
+      JOIN EntryTest et ON et.TestID = ts.TestID
+     WHERE ts.ApplicantID = p_applicant_id
+       AND et.TestType    = 'Engineering';
+
+    RETURN (v_max_score >= 140);
+END //
+
+DELIMITER ;
+
+-- =============================================================================
+-- TRANSACTION HANDLING EXAMPLE
+-- =============================================================================
+-- The block below demonstrates an explicit transaction from a client session.
+-- It is commented out so that rerunning NUST.sql does not mutate seed data;
+-- uncomment to exercise it interactively against a fresh load of the schema.
+--
+-- Business scenario: applicant Sara (Application 20, Status='Selected') accepts
+-- her BBA offer. Three things must happen atomically:
+--   (1) Student row is inserted (this fires AutoUpdateApplicationStatus,
+--       flipping Application 20 from 'Selected' to 'Enrolled').
+--   (2) A tuition Fee row is recorded for the new student.
+--   (3) If either step fails (e.g. the XOR CHECK on Fee rejects the row, or
+--       the Application is not in 'Selected' state), the whole transaction
+--       rolls back — no orphan Student, no orphan Fee.
+--
+-- START TRANSACTION;
+--
+--   INSERT INTO Student (ApplicationID, EnrollmentDate, CGPA, Status)
+--   VALUES (20, '2026-09-01', 0.00, 'Active');
+--
+--   INSERT INTO Fee (ApplicationID, StudentID, FeeType, Amount, PaymentDate, Method)
+--   VALUES (NULL,
+--           (SELECT StudentID FROM Student WHERE ApplicationID = 20),
+--           'Tuition', 120000.00, '2026-09-01', 'Bank');
+--
+-- COMMIT;
+-- -- On any error: ROLLBACK;
+--
+-- Equivalent single-call form using the stored procedure above:
+-- CALL AcceptAdmission(20, '2026-09-01', 120000.00);

@@ -2,7 +2,11 @@
   "permissions": {
     "allow": [
       "Read(//c/Program Files/MySQL//**)",
-      "Read(//c/Program Files \\(x86\\)/MySQL//**)"
+      "Read(//c/Program Files \\(x86\\)/MySQL//**)",
+      "Bash(\"/c/Program Files/MySQL/MySQL Server 8.0/bin/mysql.exe\" -u root -p\"AbdSEECS2025-29\")",
+      "Bash(\"/c/Program Files/MySQL/MySQL Server 8.0/bin/mysql.exe\" -u root -p\"AbdSEECS2025-29\" nust_university)",
+      "Bash(\"/c/Program Files/MySQL/MySQL Server 8.0/bin/mysql.exe\" -u root -p\"AbdSEECS2025-29\" -e \"DROP DATABASE IF EXISTS nust_university; CREATE DATABASE nust_university;\")",
+      "Bash('/c/Program Files/MySQL/MySQL Server 8.0/bin/mysql.exe' -u root -pAbdSEECS2025-29 nust_university -e ' *)"
     ]
   }
 }
