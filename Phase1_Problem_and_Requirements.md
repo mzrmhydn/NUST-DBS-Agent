@@ -57,41 +57,31 @@ The schema is intentionally **narrow in scope and deep in correctness** — 15 e
 | FR-10 | The system shall record every **Student** as exactly one accepted Application, with a unique `ApplicationID`, an enrollment date, a CGPA in `[0.00, 4.00]`, and a typed status `{Active, Graduated, Suspended, Withdrawn}`. |
 | FR-11 | The system shall **automatically promote** an Application from `Selected` to `Enrolled` when a matching Student row is inserted, leaving any sibling Applications of the same Applicant (Waitlisted / Rejected / Declined) untouched. |
 
-### 2.3 Financial pipeline
+### 2.3 Academic pipeline
 
 | # | Requirement |
 | --- | --- |
-| FR-12 | The system shall maintain a **unified Fee ledger** that records every payment in a single table. |
-| FR-13 | The system shall classify each Fee by `FeeType ∈ {Application, Tuition, Hostel, Library}` and reject any other value. |
-| FR-14 | The system shall enforce an XOR invariant on every Fee row: `FeeType='Application'` rows must have `ApplicationID IS NOT NULL AND StudentID IS NULL`; all other fee types must have `StudentID IS NOT NULL AND ApplicationID IS NULL`. |
-| FR-15 | The system shall accept at most one `Application`-type Fee per Application (unique partial index on `Fee(ApplicationID)`). |
-| FR-16 | The system shall reject any Fee whose `Amount` is negative or whose `Method` is not in `{Bank, Online, Cheque, Cash}`. |
+| FR-12 | The system shall maintain **Instructors** employed by exactly one School, with a unique email and a typed title `{Lecturer, Assistant Professor, Associate Professor, Professor}`. |
+| FR-13 | The system shall maintain **Courses** owned by a School (not a Program), with a globally unique `CourseCode` and credit hours in `[1, 6]`. |
+| FR-14 | The system shall express a Program's curriculum as a **many-to-many** relationship via `ProgramCourse`, so a course can belong to many programs without duplication. Each row shall carry `CourseType ∈ {Core, Elective}` and a recommended `Semester ∈ [1, 10]`. |
+| FR-15 | The system shall maintain **Terms** (Fall 2025, Spring 2026, …) with non-overlapping start/end dates and a unique term name, and reject any term whose `EndDate <= StartDate`. |
+| FR-16 | The system shall maintain **Classrooms** owned by a School, each with a unique `(School, RoomNumber)` pair, a positive capacity, and a typed `RoomType ∈ {Lecture, Lab, Studio, Hall}`. |
+| FR-17 | The system shall model every **Section** as a scheduled offering of one Course, in one Term, taught by one Instructor, in one Classroom — with `(CourseID, TermID, SectionName)` unique. All four foreign keys are mandatory. |
+| FR-18 | The system shall record each **Enrollment** as a row in the M:N junction between Student and Section, unique on `(StudentID, SectionID)`, with a nullable `Grade` drawn from the letter-grade alphabet and a `Status ∈ {InProgress, Completed, Withdrawn}`. |
+| FR-19 | The system shall enforce the invariant that `Status='Completed' ⇒ Grade IS NOT NULL` and `Status IN ('InProgress', 'Withdrawn') ⇒ Grade IS NULL`. |
+| FR-20 | The system shall **reject any Enrollment** that would cause the hosting Section's total enrollment to exceed the hosting Classroom's capacity (trigger `EnforceClassCapacity`). |
 
-### 2.4 Academic pipeline
-
-| # | Requirement |
-| --- | --- |
-| FR-17 | The system shall maintain **Instructors** employed by exactly one School, with a unique email and a typed title `{Lecturer, Assistant Professor, Associate Professor, Professor}`. |
-| FR-18 | The system shall maintain **Courses** owned by a School (not a Program), with a globally unique `CourseCode` and credit hours in `[1, 6]`. |
-| FR-19 | The system shall express a Program's curriculum as a **many-to-many** relationship via `ProgramCourse`, so a course can belong to many programs without duplication. Each row shall carry `CourseType ∈ {Core, Elective}` and a recommended `Semester ∈ [1, 10]`. |
-| FR-20 | The system shall maintain **Terms** (Fall 2025, Spring 2026, …) with non-overlapping start/end dates and a unique term name, and reject any term whose `EndDate <= StartDate`. |
-| FR-21 | The system shall maintain **Classrooms** owned by a School, each with a unique `(School, RoomNumber)` pair, a positive capacity, and a typed `RoomType ∈ {Lecture, Lab, Studio, Hall}`. |
-| FR-22 | The system shall model every **Section** as a scheduled offering of one Course, in one Term, taught by one Instructor, in one Classroom — with `(CourseID, TermID, SectionName)` unique. All four foreign keys are mandatory. |
-| FR-23 | The system shall record each **Enrollment** as a row in the M:N junction between Student and Section, unique on `(StudentID, SectionID)`, with a nullable `Grade` drawn from the letter-grade alphabet and a `Status ∈ {InProgress, Completed, Withdrawn}`. |
-| FR-24 | The system shall enforce the invariant that `Status='Completed' ⇒ Grade IS NOT NULL` and `Status IN ('InProgress', 'Withdrawn') ⇒ Grade IS NULL`. |
-| FR-25 | The system shall **reject any Enrollment** that would cause the hosting Section's total enrollment to exceed the hosting Classroom's capacity (trigger `EnforceClassCapacity`). |
-
-### 2.5 Reporting & analytics
+### 2.4 Reporting & analytics
 
 | # | Requirement |
 | --- | --- |
-| FR-26 | The system shall expose a **StudentTranscript** view that joins Student → Application → Applicant / Program → Enrollment → Section → Course / Term to produce a complete academic record. |
-| FR-27 | The system shall expose a **ClassroomUtilization** view that reports how many sections each classroom hosts. |
-| FR-28 | The system shall support reporting of application-fee revenue per NET series, per-school conversion rate from Applicant to Student, per-Program average NET score of selected applicants, and per-school tuition revenue — without any denormalized cache columns. |
-| FR-29 | The system shall expose at least one **stored procedure** (`GenerateTuitionChallan`) for recording a tuition payment for a given student, and at least one **function** (`IsEligibleForEngineering`) that returns whether an applicant has cleared the Engineering NET threshold. |
-| FR-30 | The system shall support atomic **transactions** over multi-table admission workflows (create `Student` + record `Tuition` Fee) with `ROLLBACK` on any failure. |
+| FR-21 | The system shall expose a **StudentTranscript** view that joins Student → Application → Applicant / Program → Enrollment → Section → Course / Term to produce a complete academic record. |
+| FR-22 | The system shall expose a **ClassroomUtilization** view that reports how many sections each classroom hosts. |
+| FR-23 | The system shall support reporting of application-fee revenue per NET series, per-school conversion rate from Applicant to Student, per-Program average NET score of selected applicants, and per-school tuition revenue — without any denormalized cache columns. |
+| FR-24 | The system shall expose at least one **stored procedure** (`GenerateTuitionChallan`) for recording a tuition payment for a given student, and at least one **function** (`IsEligibleForEngineering`) that returns whether an applicant has cleared the Engineering NET threshold. |
+| FR-25 | The system shall support atomic **transactions** over multi-table admission workflows (create `Student` + record `Tuition` Fee) with `ROLLBACK` on any failure. |
 
-### 2.6 Non-functional expectations
+### 2.5 Non-functional expectations
 
 | # | Requirement |
 | --- | --- |
@@ -179,14 +169,14 @@ At query time:
 
 | # | Requirement |
 | --- | --- |
-| FR-31 | The system shall accept a free-text question from the user and return the SQL query, the raw result set, and a plain-English summary in a single API response. |
-| FR-32 | The system shall embed user questions using the same model (`nomic-embed-text`) used to build the index, so that distance metrics are comparable. |
-| FR-33 | The system shall retrieve the top-5 schema chunks most relevant to the user's question before generating SQL. |
-| FR-34 | The system shall pass retrieved context plus user question to a locally-hosted LLM (`llama3.2` via Ollama) and must not transmit any query content to external services. |
-| FR-35 | The system shall execute the generated SQL against the live `nust_university` database and return the result rows as JSON. |
-| FR-36 | The system shall display query results in the React frontend as a sortable table and, where the result is numeric, as a bar or pie chart. |
-| FR-37 | The system shall surface a clear error message when the LLM generates syntactically invalid SQL or when the query references a non-existent table or column, rather than silently returning an empty result. |
-| FR-38 | The system shall allow the knowledge base to be rebuilt by running a single script (`prompts/build_index.py`) without restarting the API server. |
+| FR-26 | The system shall accept a free-text question from the user and return the SQL query, the raw result set, and a plain-English summary in a single API response. |
+| FR-27 | The system shall embed user questions using the same model (`nomic-embed-text`) used to build the index, so that distance metrics are comparable. |
+| FR-28 | The system shall retrieve the top-5 schema chunks most relevant to the user's question before generating SQL. |
+| FR-29 | The system shall pass retrieved context plus user question to a locally-hosted LLM (`llama3.2` via Ollama) and must not transmit any query content to external services. |
+| FR-30 | The system shall execute the generated SQL against the live `nust_university` database and return the result rows as JSON. |
+| FR-31 | The system shall display query results in the React frontend as a sortable table and, where the result is numeric, as a bar or pie chart. |
+| FR-32 | The system shall surface a clear error message when the LLM generates syntactically invalid SQL or when the query references a non-existent table or column, rather than silently returning an empty result. |
+| FR-33 | The system shall allow the knowledge base to be rebuilt by running a single script (`prompts/build_index.py`) without restarting the API server. |
 
 ### 3.7 Non-functional requirements — RAG layer
 

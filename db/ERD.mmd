@@ -5,7 +5,7 @@ erDiagram
     school ||--|{ course  : "owns"
 
     program ||--o{ student : "registers"
-    program ||--o{ application : "receives"
+    program ||--|{ application : "receives"
     program ||--|{ program_course : "requires"
 
     course  ||--|{ program_course : "mapped_to"
@@ -13,18 +13,18 @@ erDiagram
     course  ||--o{ prerequisite : "has_prereq"
     course  ||--o{ prerequisite : "is_prereq_of"
 
-    term      ||--o{ section : "contains"
-    term      ||--o{ application : "intake_for"
+    term      ||--|{ section : "contains"
+    term      ||--|{ application : "intake_for"
     classroom ||--o{ section : "hosts"
     faculty   ||--o{ section : "teaches"
 
-    student ||--o{ enrollment : "enrolls_in"
-    section ||--o{ enrollment : "has_students"
+    student ||--|{ enrollment : "enrolls_in"
+    section ||--|{ enrollment : "has_students"
 
     applicant  ||--|{ application : "submits"
     applicant  ||--|{ test_attempt : "attempts"
-    entry_test ||--o{ test_attempt : "taken_as"
-    applicant  |o--o| student : "becomes"
+    entry_test ||--|{ test_attempt : "taken_as"
+    applicant  ||--o| student : "becomes"
 
     application ||--o| offer : "yields"
 
