@@ -4,7 +4,8 @@
 -- Mirrors the few-shot examples in examples.json. Demonstrates the common
 -- query patterns over the admissions + academic pipelines using the
 -- normalized schema (Student is 1:1 with Application; Course is owned by
--- School and linked to Program via the M:N ProgramCourse junction).
+-- School and linked to Program via the M:N ProgramCourse junction; all
+-- fees flow through the unified Fee table, typed by FeeType).
 
 /*
 Which program received the most applications?
@@ -81,17 +82,17 @@ WHERE Application.Status = 'Waitlisted'
 
 /*
 Which school generated the most tuition revenue?
-(StudentFee -> Student -> Application -> Program -> School.)
+(Fee -> Student -> Application -> Program -> School; filter FeeType='Tuition'.)
 */
 SELECT
     School.Name AS school_name,
-    SUM(StudentFee.Amount) AS total_tuition
-FROM StudentFee
-INNER JOIN Student     ON Student.StudentID         = StudentFee.StudentID
+    SUM(Fee.Amount) AS total_tuition
+FROM Fee
+INNER JOIN Student     ON Student.StudentID         = Fee.StudentID
 INNER JOIN Application ON Application.ApplicationID = Student.ApplicationID
 INNER JOIN Program     ON Program.ProgramID         = Application.ProgramID
 INNER JOIN School      ON School.SchoolID           = Program.SchoolID
-WHERE StudentFee.FeeType = 'Tuition'
+WHERE Fee.FeeType = 'Tuition'
 GROUP BY School.SchoolID
 ORDER BY total_tuition DESC
 LIMIT 5;
@@ -220,10 +221,12 @@ WHERE Section.SectionID IS NULL;
 
 /*
 How much total application fee revenue came from the 2026 intake?
+(Unified Fee table; restrict to FeeType='Application'.)
 */
-SELECT SUM(ApplicationFee.Amount) AS total_fees
-FROM ApplicationFee
-WHERE strftime('%Y', ApplicationFee.PaymentDate) = '2026';
+SELECT SUM(Fee.Amount) AS total_fees
+FROM Fee
+WHERE Fee.FeeType = 'Application'
+  AND strftime('%Y', Fee.PaymentDate) = '2026';
 
 /*
 Which core courses does the BSCS program require in its first two semesters?

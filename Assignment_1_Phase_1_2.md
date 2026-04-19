@@ -11,7 +11,7 @@ This gives a holistic, queryable view of a student's journey from their first NE
 The database system must support:
 - Tracking a candidate's high-school parameters and their attempts across multiple NET series.
 - Storing multi-program applications for a single candidate, each with its own `Status` (e.g., *Selected, Waitlisted, Rejected, Enrolled*) and `Preference` ranking.
-- Recording **per-application** processing fees in `ApplicationFee` (1:1 with `Application`) and **per-student** tuition / hostel / library fees in `StudentFee` (1:M from `Student`). No single polymorphic "Payment" table.
+- Recording every payment in a single unified `Fee` ledger: per-application processing fees (`FeeType = 'Application'`, keyed to `Application`) and per-student tuition / hostel / library fees (`FeeType IN ('Tuition','Hostel','Library')`, keyed to `Student`). An XOR `CHECK` guarantees exactly one of (`ApplicationID`, `StudentID`) is non-NULL per row, so the table remains strictly typed — not a loose polymorphic dumping ground.
 - Promoting a "Selected" applicant into an enrolled `Student` via a trigger-driven handoff — preserving the full audit trail back to the accepted `Application`.
 - Expressing a program's curriculum as a **many-to-many** relationship between `Program` and `Course` (the `ProgramCourse` junction), so shared courses like *Programming Fundamentals* appear in multiple programs without duplication.
 - Managing physical infrastructure (Schools, Classrooms) and the schedule (Instructor, Term, Section).
@@ -19,7 +19,7 @@ The database system must support:
 
 ## 3. Complete ER Design and Entities
 
-The database contains **16 entities** cleanly separated across two contextual pipelines, joined by a strict 1:1 bridge (`Student` ↔ accepted `Application`).
+The database contains **15 entities** cleanly separated across two contextual pipelines, joined by a strict 1:1 bridge (`Student` ↔ accepted `Application`). Of those, four are pure junction tables (`TestScore`, `Application`, `ProgramCourse`, `Enrollment`).
 
 ### Administrative Structure
 1. **School** — NUST constituent colleges (SEECS, SMME, NBS, …).
@@ -31,17 +31,18 @@ The database contains **16 entities** cleanly separated across two contextual pi
 5. **TestScore** — Junction between `Applicant` and `EntryTest` with the numeric score.
 6. **Application** — Junction between `Applicant` and `Program` with `Status` and `Preference`.
 7. **Student** — Academic record, 1:1 with exactly one accepted `Application`. Holds **only** `ApplicationID` (applicant/program reached via `Application`).
-8. **ApplicationFee** — 1:1 with `Application`, PK == `ApplicationID`.
-9. **StudentFee** — 1:M from `Student`, with `FeeType` ∈ {Tuition, Hostel, Library}.
+
+### Financials
+8. **Fee** — Unified payment ledger. `FeeType ∈ {Application, Tuition, Hostel, Library}` discriminates the row; exactly one of (`ApplicationID`, `StudentID`) is non-NULL, enforced by an XOR `CHECK`. A partial unique index guarantees at most one `Application`-type fee per `Application`.
 
 ### Academic Pipeline
-10. **Instructor** — Faculty employed by a `School`.
-11. **Course** — A teaching unit **owned by a School** (not a program), with a unique `CourseCode`.
-12. **ProgramCourse** — M:N junction binding `Course` to each `Program` that includes it, with `CourseType` ∈ {Core, Elective} and target `Semester`.
-13. **Term** — Academic semester with a start/end date.
-14. **Classroom** — Physical rooms inside a `School`, with typed capacity (Lecture / Lab / Studio / Hall).
-15. **Section** — A scheduled offering of a `Course` in a `Term`, taught by an `Instructor` in a `Classroom`.
-16. **Enrollment** — Junction between `Student` and `Section`, with separate `Grade` (nullable letter) and `Status` ∈ {InProgress, Completed, Withdrawn}.
+9. **Instructor** — Faculty employed by a `School`.
+10. **Course** — A teaching unit **owned by a School** (not a program), with a unique `CourseCode`.
+11. **ProgramCourse** — M:N junction binding `Course` to each `Program` that includes it, with `CourseType` ∈ {Core, Elective} and target `Semester`.
+12. **Term** — Academic semester with a start/end date.
+13. **Classroom** — Physical rooms inside a `School`, with typed capacity (Lecture / Lab / Studio / Hall).
+14. **Section** — A scheduled offering of a `Course` in a `Term`, taught by an `Instructor` in a `Classroom`.
+15. **Enrollment** — Junction between `Student` and `Section`, with separate `Grade` (nullable letter) and `Status` ∈ {InProgress, Completed, Withdrawn}.
 
 ### Cardinalities & Constraints
 
@@ -57,8 +58,8 @@ The database contains **16 entities** cleanly separated across two contextual pi
 | Program → Application | 1 : 0..M | A program receives many applications. |
 | **Program ↔ Course** | **M : N** (via `ProgramCourse`) | A course can belong to several programs; a program has many courses. |
 | **Application ↔ Student** | **1 : 0..1** | Every Student row is produced by exactly one accepted Application; most applications produce no student. |
-| **Application ↔ ApplicationFee** | **1 : 0..1** | An application can have at most one fee record (PK = ApplicationID). |
-| Student → StudentFee | 1 : 0..M | Many tuition / hostel / library payments per student. |
+| **Application → Fee** (`FeeType='Application'`) | **1 : 0..1** | An application has at most one processing-fee row; enforced by a partial unique index on `Fee(ApplicationID) WHERE FeeType='Application'`. |
+| **Student → Fee** (`FeeType ∈ {Tuition, Hostel, Library}`) | **1 : 0..M** | Many tuition / hostel / library payments per student. |
 | Student → Enrollment | 1 : 0..M | Students register in many sections across terms. |
 | Section → Enrollment | 1 : 0..M | A section has many enrolled students (bounded by classroom capacity). |
 | Course → Section | 1 : 0..M | A course is offered as multiple sections. |
@@ -68,7 +69,7 @@ The database contains **16 entities** cleanly separated across two contextual pi
 
 ## 4. Justification of Design Decisions
 - **Single source of truth for admissions identity.** The previous iteration denormalized `ApplicantID` and `ProgramID` onto `Student`. We now carry **only** `ApplicationID` on `Student` (UNIQUE, NOT NULL) — the applicant and admitted program are reached deterministically via `Application`. This eliminates the possibility of drift between `Student.ProgramID` and `Application.ProgramID`.
-- **Fees typed by payer rather than polymorphic.** The earlier design had one `Payment` table with three nullable foreign keys (`ApplicantID`, `StudentID`, `ApplicationID`) and a `PaymentType` discriminator. We split this into `ApplicationFee` (1:1 with `Application`, PK = `ApplicationID`) and `StudentFee` (1:M from `Student`), which enforces cardinality in the schema rather than the application layer and removes the "which FK is valid this time?" branching in every payment query.
+- **One `Fee` ledger, typed by FeeType.** The earlier design had one `Payment` table with three nullable foreign keys (`ApplicantID`, `StudentID`, `ApplicationID`) and no invariants — every payment query had to branch on "which FK is valid this time?". We keep the table-count win of a single ledger but remove its looseness: `Fee` has exactly two payer FKs (`ApplicationID`, `StudentID`), a `FeeType` discriminator, and an XOR `CHECK` that hard-wires `FeeType='Application'` to `ApplicationID` and every other `FeeType` to `StudentID`. A partial unique index also enforces the old "one application fee per application" invariant. The cardinality is thus enforced in the schema, not in application code.
 - **Course is a teaching unit, not a program-owned artefact.** A course like *Programming Fundamentals* is genuinely shared across BSCS, BESE, and BEE. Making `Course` a child of `Program` misrepresents this and forces duplicate rows. We move `Course` under `School` and introduce a true **M:N** relationship via `ProgramCourse` (carrying `CourseType` and `Semester`) — a textbook junction table.
 - **Enrollment state is factored.** `Grade` is nullable and holds only real letter grades ('A' through 'F'). In-progress and withdrawn states live on a separate `Status` column, guarded by a `CHECK` constraint that enforces the invariant (`Completed` ⇒ `Grade IS NOT NULL`; `InProgress`/`Withdrawn` ⇒ `Grade IS NULL`).
 - **Waitlist via status, not via a separate table.** Waitlisted applicants sit in `Application` with `Status = 'Waitlisted'`. No auxiliary table is needed; the state machine (`Pending → Selected → Enrolled`, or `Waitlisted` / `Rejected` / `Declined`) flows naturally on a single row.
@@ -173,28 +174,30 @@ CREATE TABLE Student (
     FOREIGN KEY (ApplicationID) REFERENCES Application(ApplicationID)
 );
 
--- 8. ApplicationFee (1:1 optional with Application)
-CREATE TABLE ApplicationFee (
-    ApplicationID INTEGER PRIMARY KEY,
+-- 8. Fee (unified ledger; XOR-constrained payer FK)
+CREATE TABLE Fee (
+    FeeID         INTEGER PRIMARY KEY AUTOINCREMENT,
+    ApplicationID INTEGER,
+    StudentID     INTEGER,
+    FeeType       VARCHAR(20) NOT NULL
+        CHECK (FeeType IN ('Application','Tuition','Hostel','Library')),
     Amount        NUMERIC(10,2) NOT NULL CHECK (Amount >= 0),
     PaymentDate   DATE NOT NULL,
     Method        VARCHAR(20) NOT NULL
         CHECK (Method IN ('Bank','Online','Cheque','Cash')),
-    FOREIGN KEY (ApplicationID) REFERENCES Application(ApplicationID) ON DELETE CASCADE
+    FOREIGN KEY (ApplicationID) REFERENCES Application(ApplicationID) ON DELETE CASCADE,
+    FOREIGN KEY (StudentID)     REFERENCES Student(StudentID)         ON DELETE CASCADE,
+    CHECK (
+        (FeeType = 'Application'
+            AND ApplicationID IS NOT NULL AND StudentID IS NULL)
+     OR (FeeType IN ('Tuition','Hostel','Library')
+            AND StudentID IS NOT NULL AND ApplicationID IS NULL)
+    )
 );
+CREATE UNIQUE INDEX IDX_Fee_OneAppFeePerApp
+    ON Fee(ApplicationID) WHERE FeeType = 'Application';
 
--- 9. StudentFee (1:M from Student)
-CREATE TABLE StudentFee (
-    FeeID       INTEGER PRIMARY KEY AUTOINCREMENT,
-    StudentID   INTEGER NOT NULL,
-    Amount      NUMERIC(10,2) NOT NULL CHECK (Amount >= 0),
-    PaymentDate DATE NOT NULL,
-    FeeType     VARCHAR(20) NOT NULL CHECK (FeeType IN ('Tuition','Hostel','Library')),
-    Method      VARCHAR(20) NOT NULL CHECK (Method IN ('Bank','Online','Cheque','Cash')),
-    FOREIGN KEY (StudentID) REFERENCES Student(StudentID) ON DELETE CASCADE
-);
-
--- 10. Instructor
+-- 9. Instructor
 CREATE TABLE Instructor (
     InstructorID INTEGER PRIMARY KEY AUTOINCREMENT,
     SchoolID     INTEGER NOT NULL,
@@ -207,7 +210,7 @@ CREATE TABLE Instructor (
     FOREIGN KEY (SchoolID) REFERENCES School(SchoolID)
 );
 
--- 11. Course (owned by School, not Program)
+-- 10. Course (owned by School, not Program)
 CREATE TABLE Course (
     CourseID   INTEGER PRIMARY KEY AUTOINCREMENT,
     SchoolID   INTEGER NOT NULL,
@@ -217,7 +220,7 @@ CREATE TABLE Course (
     FOREIGN KEY (SchoolID) REFERENCES School(SchoolID)
 );
 
--- 12. ProgramCourse (M:N junction Program <-> Course)
+-- 11. ProgramCourse (M:N junction Program <-> Course)
 CREATE TABLE ProgramCourse (
     ProgramID  INTEGER NOT NULL,
     CourseID   INTEGER NOT NULL,
@@ -229,7 +232,7 @@ CREATE TABLE ProgramCourse (
     FOREIGN KEY (CourseID)  REFERENCES Course(CourseID)   ON DELETE CASCADE
 );
 
--- 13. Term, 14. Classroom, 15. Section, 16. Enrollment  (see db/NUST.sql)
+-- 12. Term, 13. Classroom, 14. Section, 15. Enrollment  (see db/NUST.sql)
 CREATE TABLE Enrollment (
     EnrollmentID INTEGER PRIMARY KEY AUTOINCREMENT,
     StudentID    INTEGER NOT NULL,
@@ -253,7 +256,7 @@ The full seed data lives in [db/NUST.sql](db/NUST.sql). The dataset simulates tw
 - **2025 intake**: 5 students now in their 2nd/3rd semester with completed grades (A / A- / B+ / B).
 - **2026 intake**: 5 freshmen with in-progress Fall 2026 enrollments, plus Cohort 1 students simultaneously taking upper-level CS330/CS440 sections — producing realistic cross-term enrollment patterns.
 
-Total seeded: **10 Schools, 12 Programs, 15 Applicants, 10 Entry Tests, 23 Test Scores, 20 Applications, 10 Students, 15 ApplicationFees, 15 StudentFees, 12 Instructors, 15 Courses, 25 ProgramCourse rows, 10 Terms, 12 Classrooms, 17 Sections, 30 Enrollments.**
+Total seeded: **10 Schools, 12 Programs, 15 Applicants, 10 Entry Tests, 23 Test Scores, 20 Applications, 10 Students, 30 Fees (15 Application + 10 Tuition + 3 Hostel + 2 Library), 12 Instructors, 15 Courses, 25 ProgramCourse rows, 10 Terms, 12 Classrooms, 17 Sections, 30 Enrollments.**
 
 The ERD (mermaid.js source) is in [db/ERD.mmd](db/ERD.mmd).
 
@@ -266,8 +269,8 @@ INSERT INTO Applicant (FirstName, LastName, Email, HighSchoolMarks, City)
     VALUES ('Ali','Khan','ali.khan@test.com',980,'Islamabad');
 INSERT INTO Application (ApplicantID, ProgramID, ApplicationDate, Status)
     VALUES (1, 2, '2025-07-01', 'Selected');
-INSERT INTO ApplicationFee (ApplicationID, Amount, PaymentDate, Method)
-    VALUES (1, 4000.00, '2025-05-01', 'Online');
+INSERT INTO Fee (ApplicationID, StudentID, FeeType, Amount, PaymentDate, Method)
+    VALUES (1, NULL, 'Application', 4000.00, '2025-05-01', 'Online');
 -- Trigger promotes Application.Status 'Selected' -> 'Enrolled' upon Student insert
 INSERT INTO Student (ApplicationID, EnrollmentDate, CGPA)
     VALUES (1, '2025-09-01', 3.58);

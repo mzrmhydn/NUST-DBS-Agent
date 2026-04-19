@@ -1,5 +1,5 @@
 -- =============================================================================
--- NUST University Database - SQLite Schema + Seed Data
+-- NUST University Database - MySQL 8.0+ Schema + Seed Data
 -- =============================================================================
 -- A normalized relational schema for NUST spanning:
 --   * Admissions : Applicant -> EntryTest -> Application -> ApplicationFee
@@ -11,15 +11,20 @@
 -- 2. Course is owned by a School, not a Program. Program<->Course is a real
 --    M:N relationship captured in the ProgramCourse junction (with Core/Elective
 --    and Semester attributes).
--- 3. Fees split by payer:
---       ApplicationFee (PK = ApplicationID)   -- 1:1 optional with Application
---       StudentFee     (tuition/hostel/library) -- 1:M from Student
---    This removes the nullable-FK polymorphism of a single Payment table.
+-- 3. Unified Fee ledger. A single Fee table tracks both the per-application
+--    processing fee (paid by the Applicant via Application) and the per-student
+--    tuition/hostel/library fees (paid by the Student). The payer is pinned by
+--    FeeType with an XOR CHECK: exactly one of (ApplicationID, StudentID) is
+--    non-NULL per row. A UNIQUE index on ApplicationID enforces "at most one
+--    Application fee per Application" (MySQL treats multiple NULLs as distinct
+--    in UNIQUE indexes, so non-application rows with NULL ApplicationID are
+--    unaffected).
 -- 4. Enrollment separates Grade (nullable) from Status (InProgress/Completed/
 --    Withdrawn) instead of overloading one Grade column with sentinel values.
 -- =============================================================================
 
-PRAGMA foreign_keys = ON;
+SET NAMES utf8mb4;
+SET FOREIGN_KEY_CHECKS = 0;
 
 DROP TRIGGER IF EXISTS AutoUpdateApplicationStatus;
 DROP TRIGGER IF EXISTS EnforceClassCapacity;
@@ -32,8 +37,7 @@ DROP TABLE IF EXISTS Term;
 DROP TABLE IF EXISTS ProgramCourse;
 DROP TABLE IF EXISTS Course;
 DROP TABLE IF EXISTS Instructor;
-DROP TABLE IF EXISTS StudentFee;
-DROP TABLE IF EXISTS ApplicationFee;
+DROP TABLE IF EXISTS Fee;
 DROP TABLE IF EXISTS Student;
 DROP TABLE IF EXISTS Application;
 DROP TABLE IF EXISTS TestScore;
@@ -42,223 +46,274 @@ DROP TABLE IF EXISTS Applicant;
 DROP TABLE IF EXISTS Program;
 DROP TABLE IF EXISTS School;
 
+SET FOREIGN_KEY_CHECKS = 1;
+
 -- =============================================================================
 -- ADMINISTRATIVE STRUCTURE
 -- =============================================================================
 
 CREATE TABLE School (
-    SchoolID        INTEGER PRIMARY KEY AUTOINCREMENT,
-    Name            VARCHAR(100) NOT NULL UNIQUE,
+    SchoolID        INT          NOT NULL AUTO_INCREMENT,
+    Name            VARCHAR(100) NOT NULL,
     Location        VARCHAR(100),
-    EstablishedYear INTEGER
-);
+    EstablishedYear INT,
+    PRIMARY KEY (SchoolID),
+    UNIQUE KEY UQ_School_Name (Name)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- School 1 -> M Program (mandatory: every program belongs to exactly one school)
 CREATE TABLE Program (
-    ProgramID     INTEGER PRIMARY KEY AUTOINCREMENT,
-    SchoolID      INTEGER NOT NULL,
+    ProgramID     INT         NOT NULL AUTO_INCREMENT,
+    SchoolID      INT         NOT NULL,
     ProgramName   VARCHAR(100) NOT NULL,
     DegreeType    VARCHAR(20)  NOT NULL,
-    DurationYears INTEGER DEFAULT 4 CHECK (DurationYears BETWEEN 1 AND 7),
-    TotalSeats    INTEGER CHECK (TotalSeats > 0),
-    FOREIGN KEY (SchoolID) REFERENCES School(SchoolID) ON DELETE CASCADE,
-    UNIQUE (SchoolID, ProgramName)
-);
+    DurationYears INT          DEFAULT 4,
+    TotalSeats    INT,
+    PRIMARY KEY (ProgramID),
+    UNIQUE KEY UQ_Program_School_Name (SchoolID, ProgramName),
+    CONSTRAINT CHK_Program_Duration CHECK (DurationYears BETWEEN 1 AND 7),
+    CONSTRAINT CHK_Program_Seats    CHECK (TotalSeats > 0),
+    FOREIGN KEY (SchoolID) REFERENCES School(SchoolID) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- =============================================================================
 -- ADMISSIONS PIPELINE
 -- =============================================================================
 
 CREATE TABLE Applicant (
-    ApplicantID     INTEGER PRIMARY KEY AUTOINCREMENT,
+    ApplicantID     INT          NOT NULL AUTO_INCREMENT,
     FirstName       VARCHAR(50)  NOT NULL,
     LastName        VARCHAR(50)  NOT NULL,
-    Email           VARCHAR(100) NOT NULL UNIQUE,
+    Email           VARCHAR(100) NOT NULL,
     Phone           VARCHAR(20),
     DOB             DATE,
-    HighSchoolMarks INTEGER CHECK (HighSchoolMarks BETWEEN 0 AND 1100),
-    City            VARCHAR(50)
-);
+    HighSchoolMarks INT,
+    City            VARCHAR(50),
+    PRIMARY KEY (ApplicantID),
+    UNIQUE KEY UQ_Applicant_Email (Email),
+    CONSTRAINT CHK_Applicant_Marks CHECK (HighSchoolMarks BETWEEN 0 AND 1100)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE EntryTest (
-    TestID     INTEGER PRIMARY KEY AUTOINCREMENT,
-    SeriesName VARCHAR(80) NOT NULL UNIQUE,
-    TestDate   DATE NOT NULL,
-    TestType   VARCHAR(30) NOT NULL
-        CHECK (TestType IN ('Engineering','Business','Architecture','Biosciences','Chemical'))
-);
+    TestID     INT         NOT NULL AUTO_INCREMENT,
+    SeriesName VARCHAR(80) NOT NULL,
+    TestDate   DATE        NOT NULL,
+    TestType   VARCHAR(30) NOT NULL,
+    PRIMARY KEY (TestID),
+    UNIQUE KEY UQ_EntryTest_Series (SeriesName),
+    CONSTRAINT CHK_EntryTest_Type CHECK (TestType IN ('Engineering','Business','Architecture','Biosciences','Chemical'))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- Junction: Applicant M <-> M EntryTest
 CREATE TABLE TestScore (
-    TestScoreID INTEGER PRIMARY KEY AUTOINCREMENT,
-    ApplicantID INTEGER NOT NULL,
-    TestID      INTEGER NOT NULL,
-    Score       INTEGER NOT NULL CHECK (Score BETWEEN 0 AND 200),
+    TestScoreID INT NOT NULL AUTO_INCREMENT,
+    ApplicantID INT NOT NULL,
+    TestID      INT NOT NULL,
+    Score       INT NOT NULL,
+    PRIMARY KEY (TestScoreID),
+    UNIQUE KEY UQ_TestScore_Applicant_Test (ApplicantID, TestID),
+    CONSTRAINT CHK_TestScore_Score CHECK (Score BETWEEN 0 AND 200),
     FOREIGN KEY (ApplicantID) REFERENCES Applicant(ApplicantID) ON DELETE CASCADE,
-    FOREIGN KEY (TestID)      REFERENCES EntryTest(TestID)      ON DELETE CASCADE,
-    UNIQUE (ApplicantID, TestID)
-);
+    FOREIGN KEY (TestID)      REFERENCES EntryTest(TestID)      ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- Junction (with attrs): Applicant M <-> M Program
 CREATE TABLE Application (
-    ApplicationID   INTEGER PRIMARY KEY AUTOINCREMENT,
-    ApplicantID     INTEGER NOT NULL,
-    ProgramID       INTEGER NOT NULL,
-    ApplicationDate DATE    NOT NULL,
-    Preference      INTEGER DEFAULT 1 CHECK (Preference BETWEEN 1 AND 5),
-    Status          VARCHAR(20) DEFAULT 'Pending'
-        CHECK (Status IN ('Pending','Selected','Waitlisted','Rejected','Enrolled','Declined')),
+    ApplicationID   INT         NOT NULL AUTO_INCREMENT,
+    ApplicantID     INT         NOT NULL,
+    ProgramID       INT         NOT NULL,
+    ApplicationDate DATE        NOT NULL,
+    Preference      INT         DEFAULT 1,
+    Status          VARCHAR(20) DEFAULT 'Pending',
+    PRIMARY KEY (ApplicationID),
+    UNIQUE KEY UQ_Application_Applicant_Program (ApplicantID, ProgramID),
+    CONSTRAINT CHK_Application_Preference CHECK (Preference BETWEEN 1 AND 5),
+    CONSTRAINT CHK_Application_Status     CHECK (Status IN ('Pending','Selected','Waitlisted','Rejected','Enrolled','Declined')),
     FOREIGN KEY (ApplicantID) REFERENCES Applicant(ApplicantID) ON DELETE CASCADE,
-    FOREIGN KEY (ProgramID)   REFERENCES Program(ProgramID)     ON DELETE CASCADE,
-    UNIQUE (ApplicantID, ProgramID)
-);
+    FOREIGN KEY (ProgramID)   REFERENCES Program(ProgramID)     ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- Application 1 <-> 0..1 Student
 -- The Student row exists only for the ONE accepted Application of an applicant.
 -- Applicant and Program are derived through Application (no denormalization).
 CREATE TABLE Student (
-    StudentID      INTEGER PRIMARY KEY AUTOINCREMENT,
-    ApplicationID  INTEGER NOT NULL UNIQUE,
-    EnrollmentDate DATE NOT NULL,
-    CGPA           REAL DEFAULT 0.00 CHECK (CGPA BETWEEN 0.00 AND 4.00),
-    Status         VARCHAR(20) DEFAULT 'Active'
-        CHECK (Status IN ('Active','Graduated','Suspended','Withdrawn')),
+    StudentID      INT         NOT NULL AUTO_INCREMENT,
+    ApplicationID  INT         NOT NULL,
+    EnrollmentDate DATE        NOT NULL,
+    CGPA           DECIMAL(4,2) DEFAULT 0.00,
+    Status         VARCHAR(20)  DEFAULT 'Active',
+    PRIMARY KEY (StudentID),
+    UNIQUE KEY UQ_Student_Application (ApplicationID),
+    CONSTRAINT CHK_Student_CGPA   CHECK (CGPA BETWEEN 0.00 AND 4.00),
+    CONSTRAINT CHK_Student_Status CHECK (Status IN ('Active','Graduated','Suspended','Withdrawn')),
     FOREIGN KEY (ApplicationID) REFERENCES Application(ApplicationID)
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- Application 1 <-> 0..1 ApplicationFee (per-application processing fee)
-CREATE TABLE ApplicationFee (
-    ApplicationID INTEGER PRIMARY KEY,
-    Amount        NUMERIC(10,2) NOT NULL CHECK (Amount >= 0),
-    PaymentDate   DATE NOT NULL,
-    Method        VARCHAR(20) NOT NULL
-        CHECK (Method IN ('Bank','Online','Cheque','Cash')),
-    FOREIGN KEY (ApplicationID) REFERENCES Application(ApplicationID) ON DELETE CASCADE
-);
-
--- Student 1 -> M StudentFee (tuition/hostel/library)
-CREATE TABLE StudentFee (
-    FeeID       INTEGER PRIMARY KEY AUTOINCREMENT,
-    StudentID   INTEGER NOT NULL,
-    Amount      NUMERIC(10,2) NOT NULL CHECK (Amount >= 0),
-    PaymentDate DATE NOT NULL,
-    FeeType     VARCHAR(20) NOT NULL
-        CHECK (FeeType IN ('Tuition','Hostel','Library')),
-    Method      VARCHAR(20) NOT NULL
-        CHECK (Method IN ('Bank','Online','Cheque','Cash')),
-    FOREIGN KEY (StudentID) REFERENCES Student(StudentID) ON DELETE CASCADE
-);
+-- Unified Fee ledger
+--   FeeType = 'Application' : paid by the applicant, keyed to Application
+--                             (at most one such row per Application)
+--   FeeType IN ('Tuition','Hostel','Library') : paid by the student,
+--                             keyed to Student (many rows per Student)
+-- The XOR CHECK guarantees exactly one payer FK is set per row.
+-- The UNIQUE KEY on ApplicationID enforces "at most one Application-type fee
+-- per Application"; MySQL allows multiple NULLs in a UNIQUE index, so student-
+-- fee rows (ApplicationID IS NULL) are unaffected.
+CREATE TABLE Fee (
+    FeeID         INT           NOT NULL AUTO_INCREMENT,
+    ApplicationID INT,
+    StudentID     INT,
+    FeeType       VARCHAR(20)   NOT NULL,
+    Amount        DECIMAL(10,2) NOT NULL,
+    PaymentDate   DATE          NOT NULL,
+    Method        VARCHAR(20)   NOT NULL,
+    PRIMARY KEY (FeeID),
+    UNIQUE KEY IDX_Fee_OneAppFeePerApp (ApplicationID),
+    CONSTRAINT CHK_Fee_Type   CHECK (FeeType IN ('Application','Tuition','Hostel','Library')),
+    CONSTRAINT CHK_Fee_Amount CHECK (Amount >= 0),
+    CONSTRAINT CHK_Fee_Method CHECK (Method IN ('Bank','Online','Cheque','Cash')),
+    CONSTRAINT CHK_Fee_Payer  CHECK (
+        (FeeType = 'Application'
+            AND ApplicationID IS NOT NULL AND StudentID IS NULL)
+     OR (FeeType IN ('Tuition','Hostel','Library')
+            AND StudentID IS NOT NULL AND ApplicationID IS NULL)
+    ),
+    FOREIGN KEY (ApplicationID) REFERENCES Application(ApplicationID) ON DELETE CASCADE,
+    FOREIGN KEY (StudentID)     REFERENCES Student(StudentID)         ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- =============================================================================
 -- ACADEMIC PIPELINE
 -- =============================================================================
 
 CREATE TABLE Instructor (
-    InstructorID INTEGER PRIMARY KEY AUTOINCREMENT,
-    SchoolID     INTEGER NOT NULL,
-    FirstName    VARCHAR(50) NOT NULL,
-    LastName     VARCHAR(50) NOT NULL,
-    Title        VARCHAR(50) NOT NULL
-        CHECK (Title IN ('Lecturer','Assistant Professor','Associate Professor','Professor')),
-    Email        VARCHAR(100) UNIQUE,
+    InstructorID INT          NOT NULL AUTO_INCREMENT,
+    SchoolID     INT          NOT NULL,
+    FirstName    VARCHAR(50)  NOT NULL,
+    LastName     VARCHAR(50)  NOT NULL,
+    Title        VARCHAR(50)  NOT NULL,
+    Email        VARCHAR(100),
     HireDate     DATE,
+    PRIMARY KEY (InstructorID),
+    UNIQUE KEY UQ_Instructor_Email (Email),
+    CONSTRAINT CHK_Instructor_Title CHECK (Title IN ('Lecturer','Assistant Professor','Associate Professor','Professor')),
     FOREIGN KEY (SchoolID) REFERENCES School(SchoolID)
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- Course is owned by a School (a teaching unit), NOT a Program.
 -- This enables multiple programs to share the same course.
 CREATE TABLE Course (
-    CourseID   INTEGER PRIMARY KEY AUTOINCREMENT,
-    SchoolID   INTEGER NOT NULL,
-    CourseCode VARCHAR(10) NOT NULL UNIQUE,
+    CourseID   INT          NOT NULL AUTO_INCREMENT,
+    SchoolID   INT          NOT NULL,
+    CourseCode VARCHAR(10)  NOT NULL,
     CourseName VARCHAR(100) NOT NULL,
-    Credits    INTEGER NOT NULL CHECK (Credits BETWEEN 1 AND 6),
+    Credits    INT          NOT NULL,
+    PRIMARY KEY (CourseID),
+    UNIQUE KEY UQ_Course_Code (CourseCode),
+    CONSTRAINT CHK_Course_Credits CHECK (Credits BETWEEN 1 AND 6),
     FOREIGN KEY (SchoolID) REFERENCES School(SchoolID)
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- Junction: Program M <-> M Course
 CREATE TABLE ProgramCourse (
-    ProgramID  INTEGER NOT NULL,
-    CourseID   INTEGER NOT NULL,
-    CourseType VARCHAR(10) NOT NULL DEFAULT 'Core'
-        CHECK (CourseType IN ('Core','Elective')),
-    Semester   INTEGER NOT NULL CHECK (Semester BETWEEN 1 AND 10),
+    ProgramID  INT         NOT NULL,
+    CourseID   INT         NOT NULL,
+    CourseType VARCHAR(10) NOT NULL DEFAULT 'Core',
+    Semester   INT         NOT NULL,
     PRIMARY KEY (ProgramID, CourseID),
+    CONSTRAINT CHK_ProgramCourse_Type     CHECK (CourseType IN ('Core','Elective')),
+    CONSTRAINT CHK_ProgramCourse_Semester CHECK (Semester BETWEEN 1 AND 10),
     FOREIGN KEY (ProgramID) REFERENCES Program(ProgramID) ON DELETE CASCADE,
     FOREIGN KEY (CourseID)  REFERENCES Course(CourseID)   ON DELETE CASCADE
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE Term (
-    TermID    INTEGER PRIMARY KEY AUTOINCREMENT,
-    TermName  VARCHAR(50) NOT NULL UNIQUE,
-    StartDate DATE NOT NULL,
-    EndDate   DATE NOT NULL,
-    CHECK (EndDate > StartDate)
-);
+    TermID    INT         NOT NULL AUTO_INCREMENT,
+    TermName  VARCHAR(50) NOT NULL,
+    StartDate DATE        NOT NULL,
+    EndDate   DATE        NOT NULL,
+    PRIMARY KEY (TermID),
+    UNIQUE KEY UQ_Term_Name (TermName),
+    CONSTRAINT CHK_Term_Dates CHECK (EndDate > StartDate)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE Classroom (
-    ClassroomID INTEGER PRIMARY KEY AUTOINCREMENT,
-    SchoolID    INTEGER NOT NULL,
+    ClassroomID INT         NOT NULL AUTO_INCREMENT,
+    SchoolID    INT         NOT NULL,
     RoomNumber  VARCHAR(20) NOT NULL,
-    Capacity    INTEGER NOT NULL CHECK (Capacity > 0),
-    RoomType    VARCHAR(20) NOT NULL
-        CHECK (RoomType IN ('Lecture','Lab','Studio','Hall')),
-    FOREIGN KEY (SchoolID) REFERENCES School(SchoolID),
-    UNIQUE (SchoolID, RoomNumber)
-);
+    Capacity    INT         NOT NULL,
+    RoomType    VARCHAR(20) NOT NULL,
+    PRIMARY KEY (ClassroomID),
+    UNIQUE KEY UQ_Classroom_School_Room (SchoolID, RoomNumber),
+    CONSTRAINT CHK_Classroom_Capacity CHECK (Capacity > 0),
+    CONSTRAINT CHK_Classroom_RoomType CHECK (RoomType IN ('Lecture','Lab','Studio','Hall')),
+    FOREIGN KEY (SchoolID) REFERENCES School(SchoolID)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- A Section is a scheduled offering of a Course, in a Term, taught by an
 -- Instructor, in a Classroom. All four links are mandatory.
 CREATE TABLE Section (
-    SectionID    INTEGER PRIMARY KEY AUTOINCREMENT,
-    CourseID     INTEGER NOT NULL,
-    TermID       INTEGER NOT NULL,
-    InstructorID INTEGER NOT NULL,
-    ClassroomID  INTEGER NOT NULL,
+    SectionID    INT         NOT NULL AUTO_INCREMENT,
+    CourseID     INT         NOT NULL,
+    TermID       INT         NOT NULL,
+    InstructorID INT         NOT NULL,
+    ClassroomID  INT         NOT NULL,
     SectionName  VARCHAR(10) NOT NULL,
+    PRIMARY KEY (SectionID),
+    UNIQUE KEY UQ_Section_Course_Term_Name (CourseID, TermID, SectionName),
     FOREIGN KEY (CourseID)     REFERENCES Course(CourseID),
     FOREIGN KEY (TermID)       REFERENCES Term(TermID),
     FOREIGN KEY (InstructorID) REFERENCES Instructor(InstructorID),
-    FOREIGN KEY (ClassroomID)  REFERENCES Classroom(ClassroomID),
-    UNIQUE (CourseID, TermID, SectionName)
-);
+    FOREIGN KEY (ClassroomID)  REFERENCES Classroom(ClassroomID)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- Junction: Student M <-> M Section
 CREATE TABLE Enrollment (
-    EnrollmentID INTEGER PRIMARY KEY AUTOINCREMENT,
-    StudentID    INTEGER NOT NULL,
-    SectionID    INTEGER NOT NULL,
-    Grade        VARCHAR(2)
-        CHECK (Grade IS NULL OR
+    EnrollmentID INT         NOT NULL AUTO_INCREMENT,
+    StudentID    INT         NOT NULL,
+    SectionID    INT         NOT NULL,
+    Grade        VARCHAR(2),
+    Status       VARCHAR(15) NOT NULL DEFAULT 'InProgress',
+    PRIMARY KEY (EnrollmentID),
+    UNIQUE KEY UQ_Enrollment_Student_Section (StudentID, SectionID),
+    CONSTRAINT CHK_Enrollment_Grade  CHECK (Grade IS NULL OR
                Grade IN ('A','A-','B+','B','B-','C+','C','C-','D+','D','F')),
-    Status       VARCHAR(15) NOT NULL DEFAULT 'InProgress'
-        CHECK (Status IN ('InProgress','Completed','Withdrawn')),
+    CONSTRAINT CHK_Enrollment_Status CHECK (Status IN ('InProgress','Completed','Withdrawn')),
+    CONSTRAINT CHK_Enrollment_GradeStatus CHECK (
+        (Status = 'Completed'                    AND Grade IS NOT NULL)
+     OR (Status IN ('InProgress','Withdrawn')    AND Grade IS NULL)
+    ),
     FOREIGN KEY (StudentID) REFERENCES Student(StudentID),
-    FOREIGN KEY (SectionID) REFERENCES Section(SectionID),
-    UNIQUE (StudentID, SectionID),
-    -- A Completed enrollment must have a letter grade; an InProgress one must not.
-    CHECK ((Status = 'Completed' AND Grade IS NOT NULL)
-        OR (Status IN ('InProgress','Withdrawn') AND Grade IS NULL))
-);
+    FOREIGN KEY (SectionID) REFERENCES Section(SectionID)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- =============================================================================
 -- TRIGGERS
 -- =============================================================================
+
+DELIMITER //
 
 -- Reject enrollments that would exceed the hosting classroom's capacity.
 CREATE TRIGGER EnforceClassCapacity
 BEFORE INSERT ON Enrollment
 FOR EACH ROW
 BEGIN
-    SELECT CASE
-        WHEN (SELECT COUNT(*) FROM Enrollment WHERE SectionID = NEW.SectionID) >=
-             (SELECT c.Capacity
-                FROM Classroom c
-                JOIN Section   s ON s.ClassroomID = c.ClassroomID
-               WHERE s.SectionID = NEW.SectionID)
-        THEN RAISE(ABORT, 'Enrollment failed: Classroom capacity reached.')
-    END;
-END;
+    DECLARE v_current_count INT;
+    DECLARE v_capacity       INT;
+
+    SELECT COUNT(*) INTO v_current_count
+    FROM Enrollment
+    WHERE SectionID = NEW.SectionID;
+
+    SELECT c.Capacity INTO v_capacity
+    FROM Classroom c
+    JOIN Section   s ON s.ClassroomID = c.ClassroomID
+    WHERE s.SectionID = NEW.SectionID;
+
+    IF v_current_count >= v_capacity THEN
+        SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'Enrollment failed: Classroom capacity reached.';
+    END IF;
+END //
 
 -- When a Student is created, promote the corresponding accepted Application
 -- from 'Selected' to 'Enrolled'. Sibling applications of the same applicant
@@ -271,20 +326,25 @@ BEGIN
        SET Status = 'Enrolled'
      WHERE ApplicationID = NEW.ApplicationID
        AND Status        = 'Selected';
-END;
+END //
+
+DELIMITER ;
 
 -- =============================================================================
 -- INDEXES
 -- =============================================================================
-CREATE        INDEX IDX_Enrollment_Student  ON Enrollment(StudentID);
-CREATE        INDEX IDX_Section_Course      ON Section(CourseID);
-CREATE        INDEX IDX_Section_Term        ON Section(TermID);
-CREATE        INDEX IDX_Section_Instructor  ON Section(InstructorID);
-CREATE        INDEX IDX_Application_Status  ON Application(Status);
-CREATE        INDEX IDX_Application_Program ON Application(ProgramID);
-CREATE        INDEX IDX_TestScore_Test      ON TestScore(TestID);
-CREATE        INDEX IDX_Course_School       ON Course(SchoolID);
-CREATE        INDEX IDX_ProgramCourse_Course ON ProgramCourse(CourseID);
+
+CREATE INDEX IDX_Enrollment_Student   ON Enrollment(StudentID);
+CREATE INDEX IDX_Section_Course       ON Section(CourseID);
+CREATE INDEX IDX_Section_Term         ON Section(TermID);
+CREATE INDEX IDX_Section_Instructor   ON Section(InstructorID);
+CREATE INDEX IDX_Application_Status   ON Application(Status);
+CREATE INDEX IDX_Application_Program  ON Application(ProgramID);
+CREATE INDEX IDX_TestScore_Test       ON TestScore(TestID);
+CREATE INDEX IDX_Course_School        ON Course(SchoolID);
+CREATE INDEX IDX_ProgramCourse_Course ON ProgramCourse(CourseID);
+CREATE INDEX IDX_Fee_Student          ON Fee(StudentID);
+CREATE INDEX IDX_Fee_Type             ON Fee(FeeType);
 
 -- =============================================================================
 -- SEED DATA
@@ -407,46 +467,49 @@ INSERT INTO Student (ApplicationID, EnrollmentDate, CGPA, Status) VALUES
 (15,'2026-09-01',0.00,'Active'),  -- S9  Hina   (BArch,via App 15)
 (18,'2026-09-01',0.00,'Active');  -- S10 Noor   (BSAB, via App 18)
 
--- 8. ApplicationFee (15 rows: one per applicant, on their primary application) -
-INSERT INTO ApplicationFee (ApplicationID, Amount, PaymentDate, Method) VALUES
-( 1,4000.00,'2025-05-01','Online'),
-( 2,4000.00,'2025-05-02','Online'),
-( 4,4000.00,'2025-05-05','Bank'),
-( 5,4000.00,'2025-05-10','Online'),
-( 6,4000.00,'2025-05-12','Online'),
-( 8,4000.00,'2026-04-20','Online'),
-( 9,4000.00,'2026-04-22','Bank'),
-(11,4000.00,'2026-04-25','Online'),
-(12,4000.00,'2026-05-01','Cheque'),
-(14,4000.00,'2026-05-03','Online'),
-(15,4000.00,'2026-05-05','Online'),
-(17,4000.00,'2026-05-07','Online'),
-(18,4000.00,'2026-05-10','Bank'),
-(19,4000.00,'2026-05-12','Online'),
-(20,4000.00,'2026-05-14','Online');
+-- 8. Fee (30 rows total)
+--    15 Application fees (one per applicant, on their primary application)
+--  + 15 Student fees     (10 tuition + 3 hostel + 2 library)
+-- All flow through the unified Fee ledger. ApplicationID is set iff the
+-- row is the processing fee; StudentID is set iff it is a tuition/hostel/
+-- library charge. The XOR CHECK rejects any row that violates this.
+INSERT INTO Fee (ApplicationID, StudentID, FeeType, Amount, PaymentDate, Method) VALUES
+-- -- Application processing fees (paid at application time) ------------------
+( 1,  NULL,'Application',4000.00,'2025-05-01','Online'),
+( 2,  NULL,'Application',4000.00,'2025-05-02','Online'),
+( 4,  NULL,'Application',4000.00,'2025-05-05','Bank'),
+( 5,  NULL,'Application',4000.00,'2025-05-10','Online'),
+( 6,  NULL,'Application',4000.00,'2025-05-12','Online'),
+( 8,  NULL,'Application',4000.00,'2026-04-20','Online'),
+( 9,  NULL,'Application',4000.00,'2026-04-22','Bank'),
+(11,  NULL,'Application',4000.00,'2026-04-25','Online'),
+(12,  NULL,'Application',4000.00,'2026-05-01','Cheque'),
+(14,  NULL,'Application',4000.00,'2026-05-03','Online'),
+(15,  NULL,'Application',4000.00,'2026-05-05','Online'),
+(17,  NULL,'Application',4000.00,'2026-05-07','Online'),
+(18,  NULL,'Application',4000.00,'2026-05-10','Bank'),
+(19,  NULL,'Application',4000.00,'2026-05-12','Online'),
+(20,  NULL,'Application',4000.00,'2026-05-14','Online'),
+-- -- Tuition for every enrolled student --------------------------------------
+(NULL, 1,'Tuition',150000.00,'2025-08-15','Bank'),
+(NULL, 2,'Tuition',160000.00,'2025-08-16','Bank'),
+(NULL, 3,'Tuition',140000.00,'2025-08-18','Online'),
+(NULL, 4,'Tuition',120000.00,'2025-08-20','Online'),
+(NULL, 5,'Tuition',150000.00,'2025-08-22','Bank'),
+(NULL, 6,'Tuition',160000.00,'2026-08-15','Bank'),
+(NULL, 7,'Tuition',150000.00,'2026-08-16','Online'),
+(NULL, 8,'Tuition',140000.00,'2026-08-18','Bank'),
+(NULL, 9,'Tuition',145000.00,'2026-08-20','Online'),
+(NULL,10,'Tuition',135000.00,'2026-08-22','Online'),
+-- -- Hostel fees for non-Islamabad cohort ------------------------------------
+(NULL, 2,'Hostel', 55000.00,'2025-08-25','Bank'),     -- Aisha (Lahore)
+(NULL, 3,'Hostel', 55000.00,'2025-08-26','Online'),   -- Bilal (Karachi)
+(NULL, 9,'Hostel', 55000.00,'2026-08-25','Online'),   -- Hina  (Lahore)
+-- -- Library fees ------------------------------------------------------------
+(NULL, 1,'Library',  3000.00,'2025-09-10','Online'),
+(NULL, 4,'Library',  3000.00,'2025-09-12','Cash');
 
--- 9. StudentFee (15 rows: 10 tuition + 3 hostel + 2 library) -------------------
-INSERT INTO StudentFee (StudentID, Amount, PaymentDate, FeeType, Method) VALUES
--- Tuition for every enrolled student
-( 1,150000.00,'2025-08-15','Tuition','Bank'),
-( 2,160000.00,'2025-08-16','Tuition','Bank'),
-( 3,140000.00,'2025-08-18','Tuition','Online'),
-( 4,120000.00,'2025-08-20','Tuition','Online'),
-( 5,150000.00,'2025-08-22','Tuition','Bank'),
-( 6,160000.00,'2026-08-15','Tuition','Bank'),
-( 7,150000.00,'2026-08-16','Tuition','Online'),
-( 8,140000.00,'2026-08-18','Tuition','Bank'),
-( 9,145000.00,'2026-08-20','Tuition','Online'),
-(10,135000.00,'2026-08-22','Tuition','Online'),
--- Hostel fees for non-Islamabad cohort
-( 2, 55000.00,'2025-08-25','Hostel','Bank'),     -- Aisha (Lahore)
-( 3, 55000.00,'2025-08-26','Hostel','Online'),   -- Bilal (Karachi)
-( 9, 55000.00,'2026-08-25','Hostel','Online'),   -- Hina  (Lahore)
--- Library fees
-( 1,  3000.00,'2025-09-10','Library','Online'),
-( 4,  3000.00,'2025-09-12','Library','Cash');
-
--- 10. Instructor ---------------------------------------------------------------
+-- 9. Instructor ----------------------------------------------------------------
 INSERT INTO Instructor (SchoolID, FirstName, LastName, Title, Email, HireDate) VALUES
 (1,'Arshad','Ali'    ,'Professor'          ,'arshad.ali@seecs.nust.edu.pk'   ,'2010-09-01'),
 (1,'Shamim','Baig'   ,'Assistant Professor','shamim.baig@seecs.nust.edu.pk'  ,'2015-03-15'),
@@ -461,7 +524,7 @@ INSERT INTO Instructor (SchoolID, FirstName, LastName, Title, Email, HireDate) V
 (7,'Ayesha','Tariq'  ,'Associate Professor','ayesha.tariq@asab.nust.edu.pk'  ,'2013-04-12'),
 (8,'Usman' ,'Ghadeer','Professor'          ,'usman.ghadeer@scme.nust.edu.pk' ,'2011-06-15');
 
--- 11. Course (15 rows, each owned by a School) ---------------------------------
+-- 10. Course (15 rows, each owned by a School) --------------------------------
 INSERT INTO Course (SchoolID, CourseCode, CourseName, Credits) VALUES
 (1,'CS118' ,'Programming Fundamentals'   ,4),  -- 1
 (1,'CS212' ,'Object Oriented Programming',4),  -- 2
@@ -479,7 +542,7 @@ INSERT INTO Course (SchoolID, CourseCode, CourseName, Credits) VALUES
 (7,'BS201' ,'Microbiology'               ,3),  -- 14
 (8,'CHE201','Mass Transfer'              ,3);  -- 15
 
--- 12. ProgramCourse (M:N mapping: a single course appears in many programs) ----
+-- 11. ProgramCourse (M:N mapping: a single course appears in many programs) ---
 INSERT INTO ProgramCourse (ProgramID, CourseID, CourseType, Semester) VALUES
 -- CS118 Programming Fundamentals: shared across all computing/engineering programs
 ( 2, 1,'Core'    ,1),   -- BSCS
@@ -522,7 +585,7 @@ INSERT INTO ProgramCourse (ProgramID, CourseID, CourseType, Semester) VALUES
 -- CHE201 Mass Transfer
 ( 8,15,'Core'    ,3);   -- BChemE
 
--- 13. Term ---------------------------------------------------------------------
+-- 12. Term ---------------------------------------------------------------------
 INSERT INTO Term (TermName, StartDate, EndDate) VALUES
 ('Fall 2024'  ,'2024-09-01','2025-01-15'),
 ('Spring 2025','2025-02-01','2025-06-15'),
@@ -535,7 +598,7 @@ INSERT INTO Term (TermName, StartDate, EndDate) VALUES
 ('Fall 2027'  ,'2027-09-01','2028-01-15'),
 ('Spring 2028','2028-02-01','2028-06-15');
 
--- 14. Classroom ----------------------------------------------------------------
+-- 13. Classroom ----------------------------------------------------------------
 INSERT INTO Classroom (SchoolID, RoomNumber, Capacity, RoomType) VALUES
 (1,'CR-01'    ,50,'Lecture'),   -- 1
 (1,'CR-02'    ,50,'Lecture'),   -- 2
@@ -550,7 +613,7 @@ INSERT INTO Classroom (SchoolID, RoomNumber, Capacity, RoomType) VALUES
 (7,'Lab-Bio'  ,35,'Lab'),       -- 11
 (8,'Lab-Chem' ,35,'Lab');       -- 12
 
--- 15. Section ------------------------------------------------------------------
+-- 14. Section ------------------------------------------------------------------
 INSERT INTO Section (CourseID, TermID, InstructorID, ClassroomID, SectionName) VALUES
 -- Fall 2025 (Term 4): Cohort 1 intro
 ( 1,4, 1, 3,'A'),   -- 1  CS118  Lab-A
@@ -573,7 +636,7 @@ INSERT INTO Section (CourseID, TermID, InstructorID, ClassroomID, SectionName) V
 ( 4,7, 2, 1,'A'),   -- 16 CS330  CR-01
 ( 5,7, 1, 3,'A');   -- 17 CS440  Lab-A
 
--- 16. Enrollment (30 rows: history + in-progress) ------------------------------
+-- 15. Enrollment (30 rows: history + in-progress) -----------------------------
 INSERT INTO Enrollment (StudentID, SectionID, Grade, Status) VALUES
 -- Fall 2025 (completed)
 ( 1, 1,'A'  ,'Completed'),
@@ -644,4 +707,4 @@ SELECT
 FROM Classroom cr
 JOIN School sch ON sch.SchoolID = cr.SchoolID
 LEFT JOIN Section sec ON sec.ClassroomID = cr.ClassroomID
-GROUP BY cr.ClassroomID;
+GROUP BY cr.ClassroomID, sch.Name, cr.RoomNumber, cr.Capacity, cr.RoomType;

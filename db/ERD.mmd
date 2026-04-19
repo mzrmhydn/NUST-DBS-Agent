@@ -10,14 +10,18 @@
 %%
 %% PIPELINES
 %%   ADMISSIONS : School -> Program -> Application <- Applicant -> TestScore <- EntryTest
-%%                                          ApplicationFee -> Application
 %%   BRIDGE     : Application (1) -> Student (0..1)   -- an accepted Application
 %%                                                       produces exactly one Student
 %%   ACADEMIC   : Student -> Enrollment <- Section -> (Course / Term / Instructor / Classroom)
 %%                Program <-> Course  via ProgramCourse (M:N with Core/Elective + Semester)
+%%   FEES       : Fee is one table. Application ->o{ Fee (FeeType='Application'),
+%%                Student ->o{ Fee (FeeType IN 'Tuition','Hostel','Library').
+%%                Exactly one of (ApplicationID, StudentID) is non-NULL per row.
 %%
 %% Student carries ONLY ApplicationID. Applicant and Program are reached via
 %% Application, so the admissions record is the single source of truth.
+%%
+%% Entity count: 15 (4 junctions: TestScore, Application, ProgramCourse, Enrollment).
 
 erDiagram
     SCHOOL ||--|{ PROGRAM    : "offers"
@@ -32,10 +36,10 @@ erDiagram
     PROGRAM ||--o{ APPLICATION   : "receives"
     PROGRAM }o--o{ COURSE        : "curriculum (ProgramCourse)"
 
-    APPLICATION ||--o| STUDENT        : "accepted -> becomes"
-    APPLICATION ||--o| APPLICATIONFEE : "processing fee"
+    APPLICATION ||--o| STUDENT : "accepted -> becomes"
+    APPLICATION ||--o{ FEE     : "processing fee (FeeType='Application')"
 
-    STUDENT ||--o{ STUDENTFEE : "tuition / hostel / library"
+    STUDENT ||--o{ FEE        : "tuition / hostel / library (FeeType IN ...)"
     STUDENT ||--o{ ENROLLMENT : "registers"
 
     COURSE     ||--o{ SECTION    : "offered as"
@@ -98,18 +102,13 @@ erDiagram
         real   CGPA
         string Status
     }
-    APPLICATIONFEE {
-        int     ApplicationID PK "FK"
-        numeric Amount
-        date    PaymentDate
-        string  Method
-    }
-    STUDENTFEE {
+    FEE {
         int     FeeID PK
-        int     StudentID FK
+        int     ApplicationID FK "nullable; set iff FeeType='Application'"
+        int     StudentID FK "nullable; set iff FeeType in Tuition/Hostel/Library"
+        string  FeeType "Application | Tuition | Hostel | Library"
         numeric Amount
         date    PaymentDate
-        string  FeeType
         string  Method
     }
     INSTRUCTOR {

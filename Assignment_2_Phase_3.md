@@ -60,15 +60,16 @@ WHERE s.StudentID IN (
 ```
 
 ### Query 4: Application Fee Revenue per NET Series (Aggregation)
-*Tallies per-application fees paid by applicants who attempted each NET series.*
+*Tallies per-application fees paid by applicants who attempted each NET series. The unified `Fee` ledger is filtered by `FeeType='Application'` to pick out processing-fee rows.*
 ```sql
 SELECT
     et.SeriesName,
-    SUM(af.Amount) AS total_revenue
-FROM EntryTest      et
-JOIN TestScore      ts ON et.TestID       = ts.TestID
-JOIN Application    a  ON a.ApplicantID   = ts.ApplicantID
-JOIN ApplicationFee af ON af.ApplicationID = a.ApplicationID
+    SUM(f.Amount) AS total_revenue
+FROM EntryTest   et
+JOIN TestScore   ts ON et.TestID       = ts.TestID
+JOIN Application a  ON a.ApplicantID   = ts.ApplicantID
+JOIN Fee         f  ON f.ApplicationID = a.ApplicationID
+                   AND f.FeeType       = 'Application'
 GROUP BY et.SeriesName
 ORDER BY total_revenue DESC;
 ```
@@ -149,17 +150,17 @@ WHERE sec.SectionID IS NULL;
 ```
 
 ### Query 11: Top Revenue Schools from Tuition (Multi-hop traversal)
-*A hybrid query that starts at `StudentFee`, travels `Student → Application → Program → School`.*
+*A hybrid query that starts at `Fee`, filters `FeeType='Tuition'`, and travels `Student → Application → Program → School`.*
 ```sql
 SELECT
     sch.Name AS school_name,
-    SUM(sf.Amount) AS total_tuition
-FROM StudentFee sf
-JOIN Student     s   ON s.StudentID     = sf.StudentID
+    SUM(f.Amount) AS total_tuition
+FROM Fee f
+JOIN Student     s   ON s.StudentID     = f.StudentID
 JOIN Application a   ON a.ApplicationID = s.ApplicationID
 JOIN Program     pr  ON pr.ProgramID    = a.ProgramID
 JOIN School      sch ON sch.SchoolID    = pr.SchoolID
-WHERE sf.FeeType = 'Tuition'
+WHERE f.FeeType = 'Tuition'
 GROUP BY sch.SchoolID
 ORDER BY total_tuition DESC;
 ```
@@ -227,7 +228,7 @@ END;
 > **Note on SQLite.** SQLite does not support stored procedures or user-defined functions natively from SQL; these are expressed as application-side helpers (or, in MySQL/PostgreSQL, as real `PROCEDURE`/`FUNCTION` objects). The MySQL-equivalent syntax is shown below for completeness.
 
 ### Stored Procedure: Generate Tuition Challan
-*Inserts a tuition entry into `StudentFee` for the given student.*
+*Inserts a tuition row into the unified `Fee` ledger for the given student. `ApplicationID` stays NULL for tuition rows — the XOR `CHECK` on `Fee` requires it.*
 ```sql
 -- MySQL syntax
 DELIMITER //
@@ -236,8 +237,8 @@ CREATE PROCEDURE GenerateTuitionChallan(
     IN p_amount     DECIMAL(10,2)
 )
 BEGIN
-    INSERT INTO StudentFee (StudentID, Amount, PaymentDate, FeeType, Method)
-    VALUES (p_student_id, p_amount, CURDATE(), 'Tuition', 'Bank');
+    INSERT INTO Fee (ApplicationID, StudentID, FeeType, Amount, PaymentDate, Method)
+    VALUES (NULL, p_student_id, 'Tuition', p_amount, CURDATE(), 'Bank');
 
     SELECT 'Challan generated successfully' AS Message;
 END //
@@ -285,13 +286,20 @@ CREATE INDEX IDX_TestScore_Test       ON TestScore(TestID);
 -- Curriculum lookups (Course is keyed by School; ProgramCourse is bidirectional)
 CREATE INDEX IDX_Course_School        ON Course(SchoolID);
 CREATE INDEX IDX_ProgramCourse_Course ON ProgramCourse(CourseID);
+
+-- Unified Fee ledger: enforce "one application fee per application" and
+-- speed up the two hot lookup paths.
+CREATE UNIQUE INDEX IDX_Fee_OneAppFeePerApp
+    ON Fee(ApplicationID) WHERE FeeType = 'Application';
+CREATE INDEX IDX_Fee_Student ON Fee(StudentID);
+CREATE INDEX IDX_Fee_Type    ON Fee(FeeType);
 ```
 
 ## 5. Transaction Handling Example
 When a candidate accepts their admission, three things must happen atomically:
 1. The `Student` row is created (which fires `AutoUpdateApplicationStatus`, promoting the accepted `Application` from `Selected` to `Enrolled`).
-2. A tuition payment is recorded in `StudentFee`.
-3. Any prior `ApplicationFee` remains untouched.
+2. A tuition payment is recorded in `Fee` with `FeeType='Tuition'`.
+3. Any prior `Fee` row with `FeeType='Application'` for that application remains untouched.
 
 If any step fails the whole transaction must `ROLLBACK` — we cannot end up with a Student who never paid tuition, or a tuition row with no matching Student.
 
@@ -303,12 +311,13 @@ INSERT INTO Student (ApplicationID, EnrollmentDate, CGPA)
 VALUES (8, DATE('now'), 0.00);
 
 -- 2. Record the tuition payment against the freshly-created student
-INSERT INTO StudentFee (StudentID, Amount, PaymentDate, FeeType, Method)
+INSERT INTO Fee (ApplicationID, StudentID, FeeType, Amount, PaymentDate, Method)
 VALUES (
+    NULL,
     (SELECT StudentID FROM Student WHERE ApplicationID = 8),
+    'Tuition',
     120000.00,
     DATE('now'),
-    'Tuition',
     'Bank'
 );
 

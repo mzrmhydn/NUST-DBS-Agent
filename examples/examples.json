@@ -25,7 +25,7 @@
     },
     {
         "question": "Which school generated the most tuition revenue?",
-        "query": "SELECT School.Name AS school_name, SUM(StudentFee.Amount) AS total_tuition FROM StudentFee INNER JOIN Student ON Student.StudentID = StudentFee.StudentID INNER JOIN Application ON Application.ApplicationID = Student.ApplicationID INNER JOIN Program ON Program.ProgramID = Application.ProgramID INNER JOIN School ON School.SchoolID = Program.SchoolID WHERE StudentFee.FeeType = 'Tuition' GROUP BY School.SchoolID ORDER BY total_tuition DESC LIMIT 5;"
+        "query": "SELECT School.Name AS school_name, SUM(Fee.Amount) AS total_tuition FROM Fee INNER JOIN Student ON Student.StudentID = Fee.StudentID INNER JOIN Application ON Application.ApplicationID = Student.ApplicationID INNER JOIN Program ON Program.ProgramID = Application.ProgramID INNER JOIN School ON School.SchoolID = Program.SchoolID WHERE Fee.FeeType = 'Tuition' GROUP BY School.SchoolID ORDER BY total_tuition DESC LIMIT 5;"
     },
     {
         "question": "List all courses offered by the SEECS school.",
@@ -69,7 +69,7 @@
     },
     {
         "question": "Which students have never paid a tuition fee?",
-        "query": "SELECT Applicant.FirstName || ' ' || Applicant.LastName AS student_name FROM Student INNER JOIN Application ON Application.ApplicationID = Student.ApplicationID INNER JOIN Applicant ON Applicant.ApplicantID = Application.ApplicantID WHERE Student.StudentID NOT IN (SELECT StudentFee.StudentID FROM StudentFee WHERE StudentFee.FeeType = 'Tuition');"
+        "query": "SELECT Applicant.FirstName || ' ' || Applicant.LastName AS student_name FROM Student INNER JOIN Application ON Application.ApplicationID = Student.ApplicationID INNER JOIN Applicant ON Applicant.ApplicantID = Application.ApplicantID WHERE Student.StudentID NOT IN (SELECT Fee.StudentID FROM Fee WHERE Fee.FeeType = 'Tuition' AND Fee.StudentID IS NOT NULL);"
     },
     {
         "question": "Which courses have no sections offered in Fall 2026?",
@@ -77,7 +77,7 @@
     },
     {
         "question": "How much total application fee revenue came from the 2026 intake?",
-        "query": "SELECT SUM(ApplicationFee.Amount) AS total_fees FROM ApplicationFee WHERE strftime('%Y', ApplicationFee.PaymentDate) = '2026';"
+        "query": "SELECT SUM(Fee.Amount) AS total_fees FROM Fee WHERE Fee.FeeType = 'Application' AND strftime('%Y', Fee.PaymentDate) = '2026';"
     },
     {
         "question": "Which core courses does the BSCS program require in its first two semesters?",
