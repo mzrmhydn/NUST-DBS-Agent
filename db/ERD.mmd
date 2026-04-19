@@ -1,163 +1,144 @@
 %% NUST University Database - Entity Relationship Diagram
-%% Rendered with Mermaid.js - paste into https://mermaid.live to view
-%%
-%% Relationship notation (Crow's Foot):
-%%   ||--o{  one to zero-or-many        (1 : 0..*)
-%%   ||--|{  one to one-or-many         (1 : 1..*) -- mandatory many
-%%   ||--o|  one to zero-or-one         (1 : 0..1) -- optional one
-%%   ||--||  one to exactly one         (1 : 1)
-%%   }o--o{  many to many               (0..* : 0..*) -- via junction
-%%
-%% PIPELINES
-%%   ADMISSIONS : School -> Program -> Application <- Applicant -> TestScore <- EntryTest
-%%   BRIDGE     : Application (1) -> Student (0..1)   -- an accepted Application
-%%                                                       produces exactly one Student
-%%   ACADEMIC   : Student -> Enrollment <- Section -> (Course / Term / Instructor / Classroom)
-%%                Program <-> Course  via ProgramCourse (M:N with Core/Elective + Semester)
-%%   FEES       : Fee is one table. Application ->o{ Fee (FeeType='Application'),
-%%                Student ->o{ Fee (FeeType IN 'Tuition','Hostel','Library').
-%%                Exactly one of (ApplicationID, StudentID) is non-NULL per row.
-%%
-%% Student carries ONLY ApplicationID. Applicant and Program are reached via
-%% Application, so the admissions record is the single source of truth.
-%%
-%% Entity count: 15 (4 junctions: TestScore, Application, ProgramCourse, Enrollment).
-
 erDiagram
-    SCHOOL ||--|{ PROGRAM    : "offers"
-    SCHOOL ||--o{ INSTRUCTOR : "employs"
-    SCHOOL ||--o{ CLASSROOM  : "contains"
-    SCHOOL ||--o{ COURSE     : "owns"
+    school ||--o{ faculty : "employs"
+    school ||--o{ program : "offers"
+    school ||--o{ course  : "owns"
 
-    APPLICANT ||--o{ TESTSCORE   : "earns"
-    APPLICANT ||--o{ APPLICATION : "submits"
-    ENTRYTEST ||--o{ TESTSCORE   : "graded as"
+    program ||--o{ student : "registers"
+    program ||--o{ application : "receives"
+    program ||--|{ program_course : "requires"
 
-    PROGRAM ||--o{ APPLICATION   : "receives"
-    PROGRAM }o--o{ COURSE        : "curriculum (ProgramCourse)"
+    course  ||--|{ program_course : "mapped_to"
+    course  ||--o{ section : "offered_as"
+    course  ||--o{ prerequisite : "has_prereq"
+    course  ||--o{ prerequisite : "is_prereq_of"
 
-    APPLICATION ||--o| STUDENT : "accepted -> becomes"
-    APPLICATION ||--o{ FEE     : "processing fee (FeeType='Application')"
+    term      ||--o{ section : "contains"
+    term      ||--o{ application : "intake_for"
+    classroom ||--o{ section : "hosts"
+    faculty   ||--o{ section : "teaches"
 
-    STUDENT ||--o{ FEE        : "tuition / hostel / library (FeeType IN ...)"
-    STUDENT ||--o{ ENROLLMENT : "registers"
+    student ||--o{ enrollment : "enrolls_in"
+    section ||--o{ enrollment : "has_students"
 
-    COURSE     ||--o{ SECTION    : "offered as"
-    TERM       ||--o{ SECTION    : "scheduled in"
-    INSTRUCTOR ||--o{ SECTION    : "teaches"
-    CLASSROOM  ||--o{ SECTION    : "hosted in"
-    SECTION    ||--o{ ENROLLMENT : "roster of"
+    applicant  ||--o{ application : "submits"
+    applicant  ||--o{ test_attempt : "attempts"
+    entry_test ||--o{ test_attempt : "taken_as"
+    applicant  |o--o| student : "becomes"
 
-    PROGRAM       ||--o{ PROGRAMCOURSE : "has"
-    COURSE        ||--o{ PROGRAMCOURSE : "listed in"
+    application ||--o| offer : "yields"
 
-    SCHOOL {
-        int    SchoolID PK
-        string Name UK
-        string Location
-        int    EstablishedYear
+    school {
+        VARCHAR school_id PK
+        VARCHAR school_name
+        VARCHAR abbreviation
+        SMALLINT established_year
     }
-    PROGRAM {
-        int    ProgramID PK
-        int    SchoolID FK
-        string ProgramName
-        string DegreeType
-        int    DurationYears
-        int    TotalSeats
+    faculty {
+        VARCHAR faculty_id PK
+        VARCHAR school_id FK
+        VARCHAR full_name
+        VARCHAR email
+        VARCHAR designation
     }
-    APPLICANT {
-        int    ApplicantID PK
-        string FirstName
-        string LastName
-        string Email UK
-        string Phone
-        date   DOB
-        int    HighSchoolMarks
-        string City
+    program {
+        VARCHAR program_id PK
+        VARCHAR school_id FK
+        VARCHAR program_name
+        ENUM    degree_type
+        TINYINT total_semesters
+        SMALLINT total_credits
+        SMALLINT total_seats
     }
-    ENTRYTEST {
-        int    TestID PK
-        string SeriesName UK
-        date   TestDate
-        string TestType
+    course {
+        VARCHAR course_code PK
+        VARCHAR school_id FK
+        VARCHAR course_title
+        ENUM    course_type
+        TINYINT credit_hours
+        TINYINT contact_hours
     }
-    TESTSCORE {
-        int    TestScoreID PK
-        int    ApplicantID FK
-        int    TestID FK
-        int    Score
+    prerequisite {
+        VARCHAR course_code PK
+        VARCHAR prereq_course_code PK
     }
-    APPLICATION {
-        int    ApplicationID PK
-        int    ApplicantID FK
-        int    ProgramID FK
-        date   ApplicationDate
-        int    Preference
-        string Status
+    program_course {
+        VARCHAR program_id PK
+        VARCHAR course_code PK
+        TINYINT recommended_semester
+        BOOLEAN is_core
     }
-    STUDENT {
-        int    StudentID PK
-        int    ApplicationID FK "UNIQUE"
-        date   EnrollmentDate
-        real   CGPA
-        string Status
+    term {
+        VARCHAR term_id PK
+        ENUM    term_name
+        SMALLINT academic_year
+        DATE    start_date
+        DATE    end_date
     }
-    FEE {
-        int     FeeID PK
-        int     ApplicationID FK "nullable; set iff FeeType='Application'"
-        int     StudentID FK "nullable; set iff FeeType in Tuition/Hostel/Library"
-        string  FeeType "Application | Tuition | Hostel | Library"
-        numeric Amount
-        date    PaymentDate
-        string  Method
+    classroom {
+        VARCHAR classroom_id PK
+        VARCHAR building
+        VARCHAR room_number
+        SMALLINT capacity
     }
-    INSTRUCTOR {
-        int    InstructorID PK
-        int    SchoolID FK
-        string FirstName
-        string LastName
-        string Title
-        string Email UK
-        date   HireDate
+    student {
+        VARCHAR student_id PK
+        VARCHAR program_id FK
+        VARCHAR applicant_id FK
+        VARCHAR full_name
+        VARCHAR email
+        TINYINT current_semester
+        DATE    enrollment_date
     }
-    COURSE {
-        int    CourseID PK
-        int    SchoolID FK
-        string CourseCode UK
-        string CourseName
-        int    Credits
+    section {
+        VARCHAR section_id PK
+        VARCHAR course_code FK
+        VARCHAR term_id FK
+        VARCHAR classroom_id FK
+        VARCHAR faculty_id FK
+        VARCHAR section_label
     }
-    PROGRAMCOURSE {
-        int    ProgramID PK "FK"
-        int    CourseID  PK "FK"
-        string CourseType
-        int    Semester
+    enrollment {
+        VARCHAR student_id PK
+        VARCHAR section_id PK
+        DECIMAL attendance_percentage
+        ENUM    grade
     }
-    TERM {
-        int    TermID PK
-        string TermName UK
-        date   StartDate
-        date   EndDate
+    applicant {
+        VARCHAR applicant_id PK
+        VARCHAR full_name
+        VARCHAR cnic
+        VARCHAR email
+        ENUM    high_school_board
+        DECIMAL high_school_score
+        DECIMAL best_test_score
     }
-    CLASSROOM {
-        int    ClassroomID PK
-        int    SchoolID FK
-        string RoomNumber
-        int    Capacity
-        string RoomType
+    entry_test {
+        VARCHAR test_id PK
+        ENUM    test_type
+        DATE    test_date
+        SMALLINT total_marks
     }
-    SECTION {
-        int    SectionID PK
-        int    CourseID FK
-        int    TermID FK
-        int    InstructorID FK
-        int    ClassroomID FK
-        string SectionName
+    test_attempt {
+        VARCHAR applicant_id PK
+        VARCHAR test_id PK
+        DECIMAL score
     }
-    ENROLLMENT {
-        int    EnrollmentID PK
-        int    StudentID FK
-        int    SectionID FK
-        string Grade
-        string Status
+    application {
+        VARCHAR application_id PK
+        VARCHAR applicant_id FK
+        VARCHAR program_id FK
+        VARCHAR term_id FK
+        DECIMAL snapshot_hs_score
+        DECIMAL snapshot_best_test
+        DECIMAL aggregate_score
+        DATE    submission_date
+        ENUM    status
+    }
+    offer {
+        VARCHAR offer_id PK
+        VARCHAR application_id FK
+        DATE    issue_date
+        DATE    expiry_date
+        ENUM    status
     }

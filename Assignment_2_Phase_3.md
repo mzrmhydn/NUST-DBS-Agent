@@ -1,6 +1,6 @@
 # Phase 3: Implementation & Queries
 
-This document contains the functional implementation of the Phase 3 requirements on the normalized NUST database. All queries are written in **SQLite** (the concrete dialect used by the backing `db/NUST.db`). Views, triggers, and indexes are created inside [db/NUST.sql](db/NUST.sql).
+This document contains the functional implementation of the Phase 3 requirements on the normalized NUST database. All queries are written in **MySQL 8.0+** (the concrete dialect used by the backing `nust_university` database). Views, triggers, and indexes are created inside [db/NUST.sql](db/NUST.sql).
 
 ## 1. 10+ Complex SQL Queries
 
@@ -225,7 +225,7 @@ END;
 
 ## 3. Stored Procedures and Functions
 
-> **Note on SQLite.** SQLite does not support stored procedures or user-defined functions natively from SQL; these are expressed as application-side helpers (or, in MySQL/PostgreSQL, as real `PROCEDURE`/`FUNCTION` objects). The MySQL-equivalent syntax is shown below for completeness.
+> **Note.** MySQL supports `PROCEDURE` and `FUNCTION` objects natively — the implementations below run inside the `nust_university` database using standard MySQL `DELIMITER` syntax.
 
 ### Stored Procedure: Generate Tuition Challan
 *Inserts a tuition row into the unified `Fee` ledger for the given student. `ApplicationID` stays NULL for tuition rows — the XOR `CHECK` on `Fee` requires it.*

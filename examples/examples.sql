@@ -1,245 +1,319 @@
 -- =============================================================================
--- NUST University Database - Example Queries
+-- NUST University Database - Example Queries (MySQL 8.0+)
 -- =============================================================================
--- Mirrors the few-shot examples in examples.json. Demonstrates the common
--- query patterns over the admissions + academic pipelines using the
--- normalized schema (Student is 1:1 with Application; Course is owned by
--- School and linked to Program via the M:N ProgramCourse junction; all
--- fees flow through the unified Fee table, typed by FeeType).
+-- Mirrors the few-shot examples in examples.json. Targets the normalized
+-- schema in db/NUST.sql:
+--   * Admissions : applicant -> test_attempt -> entry_test,
+--                  applicant -> application  -> program / term,
+--                  application -> offer
+--   * Academic   : school -> program -> student,
+--                  school -> course, program <-> course via program_course,
+--                  term + classroom + faculty + course -> section,
+--                  student <-> section via enrollment (grade + attendance).
+-- All identifiers are lowercase snake_case. term_name is an ENUM('Fall',
+-- 'Spring','Summer'); filter on term_name AND academic_year to pin a term.
 
 /*
 Which program received the most applications?
 */
 SELECT
-    Program.ProgramName,
-    COUNT(Application.ApplicationID) AS application_count
-FROM Application
-INNER JOIN Program ON Program.ProgramID = Application.ProgramID
-GROUP BY Application.ProgramID
+    program.program_name,
+    COUNT(application.application_id) AS application_count
+FROM application
+INNER JOIN program ON program.program_id = application.program_id
+GROUP BY application.program_id
 ORDER BY application_count DESC
 LIMIT 5;
 
 /*
-What is the average NET score per entry test series?
+What is the average NET score per test type?
 */
 SELECT
-    EntryTest.SeriesName,
-    AVG(TestScore.Score) AS avg_score
-FROM TestScore
-INNER JOIN EntryTest ON EntryTest.TestID = TestScore.TestID
-GROUP BY TestScore.TestID
+    entry_test.test_type,
+    AVG(test_attempt.score) AS avg_score
+FROM test_attempt
+INNER JOIN entry_test ON entry_test.test_id = test_attempt.test_id
+GROUP BY entry_test.test_type
 ORDER BY avg_score DESC;
 
 /*
-List all applicants who were selected for BSCS.
+List all applicants who were offered admission to BS Computer Science.
 */
-SELECT
-    Applicant.FirstName || ' ' || Applicant.LastName AS applicant_name
-FROM Applicant
-INNER JOIN Application ON Application.ApplicantID = Applicant.ApplicantID
-INNER JOIN Program     ON Program.ProgramID       = Application.ProgramID
-WHERE Program.DegreeType = 'BSCS'
-  AND Application.Status IN ('Selected','Enrolled');
+SELECT applicant.full_name
+FROM applicant
+INNER JOIN application ON application.applicant_id = applicant.applicant_id
+INNER JOIN program     ON program.program_id       = application.program_id
+WHERE program.program_id = 'BSCS'
+  AND application.status IN ('Offered','Accepted');
 
 /*
 How many students are enrolled in each program?
-(Student -> Application -> Program; Student has no direct ProgramID.)
+(student.program_id is a direct FK on student, no join through application needed.)
 */
 SELECT
-    Program.ProgramName,
-    COUNT(Student.StudentID) AS student_count
-FROM Student
-INNER JOIN Application ON Application.ApplicationID = Student.ApplicationID
-INNER JOIN Program     ON Program.ProgramID         = Application.ProgramID
-GROUP BY Program.ProgramID
+    program.program_name,
+    COUNT(student.student_id) AS student_count
+FROM student
+INNER JOIN program ON program.program_id = student.program_id
+GROUP BY student.program_id
 ORDER BY student_count DESC;
 
 /*
-What is the top 5 highest NET scores of all time?
+What are the top 5 highest NET scores of all time?
 */
 SELECT
-    Applicant.FirstName || ' ' || Applicant.LastName AS applicant_name,
-    EntryTest.SeriesName,
-    TestScore.Score
-FROM TestScore
-INNER JOIN Applicant ON Applicant.ApplicantID = TestScore.ApplicantID
-INNER JOIN EntryTest ON EntryTest.TestID      = TestScore.TestID
-ORDER BY TestScore.Score DESC
+    applicant.full_name,
+    entry_test.test_type,
+    test_attempt.score
+FROM test_attempt
+INNER JOIN applicant  ON applicant.applicant_id = test_attempt.applicant_id
+INNER JOIN entry_test ON entry_test.test_id     = test_attempt.test_id
+ORDER BY test_attempt.score DESC
 LIMIT 5;
 
 /*
-How many waitlisted applicants scored above 140 in the NET?
+How many rejected applicants scored above 140 in the NET?
 */
-SELECT COUNT(DISTINCT Applicant.ApplicantID) AS waitlisted_high_scorers
-FROM Applicant
-INNER JOIN Application ON Application.ApplicantID = Applicant.ApplicantID
-WHERE Application.Status = 'Waitlisted'
-  AND Applicant.ApplicantID IN (
-      SELECT TestScore.ApplicantID
-      FROM TestScore
-      WHERE TestScore.Score > 140
+SELECT COUNT(DISTINCT applicant.applicant_id) AS rejected_high_scorers
+FROM applicant
+INNER JOIN application ON application.applicant_id = applicant.applicant_id
+WHERE application.status = 'Rejected'
+  AND applicant.applicant_id IN (
+      SELECT test_attempt.applicant_id
+      FROM test_attempt
+      WHERE test_attempt.score > 140
   );
 
 /*
-Which school generated the most tuition revenue?
-(Fee -> Student -> Application -> Program -> School; filter FeeType='Tuition'.)
+Which school owns the most courses?
+(Course is owned by School directly via course.school_id.)
 */
 SELECT
-    School.Name AS school_name,
-    SUM(Fee.Amount) AS total_tuition
-FROM Fee
-INNER JOIN Student     ON Student.StudentID         = Fee.StudentID
-INNER JOIN Application ON Application.ApplicationID = Student.ApplicationID
-INNER JOIN Program     ON Program.ProgramID         = Application.ProgramID
-INNER JOIN School      ON School.SchoolID           = Program.SchoolID
-WHERE Fee.FeeType = 'Tuition'
-GROUP BY School.SchoolID
-ORDER BY total_tuition DESC
+    school.school_name,
+    COUNT(course.course_code) AS course_count
+FROM school
+INNER JOIN course ON course.school_id = school.school_id
+GROUP BY school.school_id
+ORDER BY course_count DESC
 LIMIT 5;
 
 /*
-List all courses offered by the SEECS school.
-(Course is owned by School directly, no join through Program.)
+List all courses offered by SEECS.
 */
 SELECT
-    Course.CourseCode,
-    Course.CourseName,
-    Course.Credits
-FROM Course
-INNER JOIN School ON School.SchoolID = Course.SchoolID
-WHERE School.Name = 'SEECS';
+    course.course_code,
+    course.course_title,
+    course.credit_hours
+FROM course
+INNER JOIN school ON school.school_id = course.school_id
+WHERE school.abbreviation = 'SEECS';
 
 /*
 Which courses are shared across multiple programs?
-(ProgramCourse junction demonstrates the M:N relationship.)
+(program_course junction demonstrates the M:N relationship.)
 */
 SELECT
-    Course.CourseCode,
-    Course.CourseName,
-    COUNT(ProgramCourse.ProgramID) AS num_programs
-FROM Course
-INNER JOIN ProgramCourse ON ProgramCourse.CourseID = Course.CourseID
-GROUP BY Course.CourseID
+    course.course_code,
+    course.course_title,
+    COUNT(program_course.program_id) AS num_programs
+FROM course
+INNER JOIN program_course ON program_course.course_code = course.course_code
+GROUP BY course.course_code
 HAVING num_programs > 1
 ORDER BY num_programs DESC;
 
 /*
-Which instructor is teaching the most sections in Fall 2026?
+Which faculty member is teaching the most sections in Fall 2025?
 */
 SELECT
-    Instructor.FirstName || ' ' || Instructor.LastName AS instructor_name,
-    COUNT(Section.SectionID) AS section_count
-FROM Section
-INNER JOIN Instructor ON Instructor.InstructorID = Section.InstructorID
-INNER JOIN Term       ON Term.TermID             = Section.TermID
-WHERE Term.TermName = 'Fall 2026'
-GROUP BY Section.InstructorID
+    faculty.full_name,
+    COUNT(section.section_id) AS section_count
+FROM section
+INNER JOIN faculty ON faculty.faculty_id = section.faculty_id
+INNER JOIN term    ON term.term_id       = section.term_id
+WHERE term.term_name = 'Fall' AND term.academic_year = 2025
+GROUP BY section.faculty_id
 ORDER BY section_count DESC
 LIMIT 5;
 
 /*
-List the full transcript (course, term, grade, status) for student Ali Khan.
-(Student -> Application -> Applicant for identity.)
+Full transcript (course, term, grade, attendance) for student S001.
 */
 SELECT
-    Course.CourseCode,
-    Course.CourseName,
-    Term.TermName,
-    Enrollment.Grade,
-    Enrollment.Status
-FROM Enrollment
-INNER JOIN Student     ON Student.StudentID         = Enrollment.StudentID
-INNER JOIN Application ON Application.ApplicationID = Student.ApplicationID
-INNER JOIN Applicant   ON Applicant.ApplicantID     = Application.ApplicantID
-INNER JOIN Section     ON Section.SectionID         = Enrollment.SectionID
-INNER JOIN Course      ON Course.CourseID           = Section.CourseID
-INNER JOIN Term        ON Term.TermID               = Section.TermID
-WHERE Applicant.FirstName = 'Ali'
-  AND Applicant.LastName  = 'Khan'
-ORDER BY Term.StartDate;
+    course.course_code,
+    course.course_title,
+    term.term_name,
+    term.academic_year,
+    enrollment.grade,
+    enrollment.attendance_percentage
+FROM enrollment
+INNER JOIN section ON section.section_id = enrollment.section_id
+INNER JOIN course  ON course.course_code = section.course_code
+INNER JOIN term    ON term.term_id       = section.term_id
+WHERE enrollment.student_id = 'S001'
+ORDER BY term.start_date;
 
 /*
 How many students are currently enrolled in 'Database Systems'?
 */
-SELECT COUNT(Enrollment.EnrollmentID) AS enrollment_count
-FROM Enrollment
-INNER JOIN Section ON Section.SectionID = Enrollment.SectionID
-INNER JOIN Course  ON Course.CourseID   = Section.CourseID
-WHERE Course.CourseName = 'Database Systems';
+SELECT COUNT(*) AS enrollment_count
+FROM enrollment
+INNER JOIN section ON section.section_id = enrollment.section_id
+INNER JOIN course  ON course.course_code = section.course_code
+WHERE course.course_title = 'Database Systems';
 
 /*
-Which applicants scored above the average score of the test series they took?
+Which applicants scored above the average score of the test they took?
 */
 SELECT
-    Applicant.FirstName || ' ' || Applicant.LastName AS applicant_name,
-    EntryTest.SeriesName,
-    TestScore.Score
-FROM TestScore
-INNER JOIN Applicant ON Applicant.ApplicantID = TestScore.ApplicantID
-INNER JOIN EntryTest ON EntryTest.TestID      = TestScore.TestID
-WHERE TestScore.Score > (
-    SELECT AVG(ts2.Score) FROM TestScore ts2 WHERE ts2.TestID = TestScore.TestID
+    applicant.full_name,
+    entry_test.test_type,
+    test_attempt.score
+FROM test_attempt
+INNER JOIN applicant  ON applicant.applicant_id = test_attempt.applicant_id
+INNER JOIN entry_test ON entry_test.test_id     = test_attempt.test_id
+WHERE test_attempt.score > (
+    SELECT AVG(ta2.score)
+    FROM test_attempt ta2
+    WHERE ta2.test_id = test_attempt.test_id
 );
 
 /*
-What is the conversion rate (applicants to students) for each school?
+What is the conversion rate (applications -> students) for each school?
+(A student is linked back to applicant via student.applicant_id; matching on
+program_id as well keeps the pairing program-accurate.)
 */
 SELECT
-    School.Name AS school_name,
-    COUNT(DISTINCT Application.ApplicantID) AS total_applicants,
-    COUNT(DISTINCT Student.StudentID)       AS converted_students
-FROM School
-INNER JOIN Program     ON Program.SchoolID        = School.SchoolID
-LEFT  JOIN Application ON Application.ProgramID   = Program.ProgramID
-LEFT  JOIN Student     ON Student.ApplicationID   = Application.ApplicationID
-GROUP BY School.SchoolID;
+    school.school_name,
+    COUNT(DISTINCT application.applicant_id) AS total_applicants,
+    COUNT(DISTINCT student.student_id)       AS converted_students
+FROM school
+INNER JOIN program         ON program.school_id      = school.school_id
+LEFT  JOIN application     ON application.program_id = program.program_id
+LEFT  JOIN student         ON student.applicant_id   = application.applicant_id
+                           AND student.program_id    = program.program_id
+GROUP BY school.school_id;
 
 /*
-Show students with CGPA above 3.5.
+Show all students with CGPA above 3.5.
+(GPA is computed from enrollment.grade via a CASE map; I/W/NULL are excluded.)
 */
 SELECT
-    Applicant.FirstName || ' ' || Applicant.LastName AS student_name,
-    Program.ProgramName,
-    Student.CGPA
-FROM Student
-INNER JOIN Application ON Application.ApplicationID = Student.ApplicationID
-INNER JOIN Applicant   ON Applicant.ApplicantID     = Application.ApplicantID
-INNER JOIN Program     ON Program.ProgramID         = Application.ProgramID
-WHERE Student.CGPA > 3.5
-ORDER BY Student.CGPA DESC;
+    student.student_id,
+    student.full_name,
+    program.program_name,
+    ROUND(
+        SUM(course.credit_hours *
+            CASE enrollment.grade
+                WHEN 'A'  THEN 4.0 WHEN 'B+' THEN 3.5 WHEN 'B' THEN 3.0
+                WHEN 'C+' THEN 2.5 WHEN 'C'  THEN 2.0 WHEN 'D+' THEN 1.5
+                WHEN 'D'  THEN 1.0 WHEN 'F'  THEN 0.0 WHEN 'XF' THEN 0.0
+            END)
+        / SUM(course.credit_hours), 2
+    ) AS cgpa
+FROM enrollment
+INNER JOIN section ON section.section_id = enrollment.section_id
+INNER JOIN course  ON course.course_code = section.course_code
+INNER JOIN student ON student.student_id = enrollment.student_id
+INNER JOIN program ON program.program_id = student.program_id
+WHERE enrollment.grade IS NOT NULL
+  AND enrollment.grade NOT IN ('I','W')
+GROUP BY student.student_id, student.full_name, program.program_name
+HAVING cgpa > 3.5
+ORDER BY cgpa DESC;
 
 /*
-Which courses have no sections offered in Fall 2026?
+Which classrooms are over-utilized (hosting more than 2 sections)?
 */
 SELECT
-    Course.CourseCode,
-    Course.CourseName
-FROM Course
-LEFT JOIN Section ON Section.CourseID = Course.CourseID
-   AND Section.TermID = (SELECT Term.TermID FROM Term WHERE Term.TermName = 'Fall 2026')
-WHERE Section.SectionID IS NULL;
+    classroom.building,
+    classroom.room_number,
+    COUNT(section.section_id) AS sections_hosted
+FROM classroom
+LEFT JOIN section ON section.classroom_id = classroom.classroom_id
+GROUP BY classroom.classroom_id
+HAVING sections_hosted > 2
+ORDER BY sections_hosted DESC;
 
 /*
-How much total application fee revenue came from the 2026 intake?
-(Unified Fee table; restrict to FeeType='Application'.)
+List all applicants from the Sindh board.
 */
-SELECT SUM(Fee.Amount) AS total_fees
-FROM Fee
-WHERE Fee.FeeType = 'Application'
-  AND strftime('%Y', Fee.PaymentDate) = '2026';
+SELECT
+    applicant.full_name,
+    applicant.email
+FROM applicant
+WHERE applicant.high_school_board = 'Sindh';
+
+/*
+Which courses have no sections offered in Fall 2025?
+*/
+SELECT
+    course.course_code,
+    course.course_title
+FROM course
+LEFT JOIN section ON section.course_code = course.course_code
+   AND section.term_id = (
+       SELECT term.term_id
+       FROM term
+       WHERE term.term_name = 'Fall' AND term.academic_year = 2025
+   )
+WHERE section.section_id IS NULL;
 
 /*
 Which core courses does the BSCS program require in its first two semesters?
-(Program <-> Course M:N via ProgramCourse.)
+(program <-> course M:N via program_course; recommended_semester pins the term.)
 */
 SELECT
-    Course.CourseCode,
-    Course.CourseName,
-    ProgramCourse.Semester
-FROM ProgramCourse
-INNER JOIN Course  ON Course.CourseID  = ProgramCourse.CourseID
-INNER JOIN Program ON Program.ProgramID = ProgramCourse.ProgramID
-WHERE Program.DegreeType = 'BSCS'
-  AND ProgramCourse.CourseType = 'Core'
-  AND ProgramCourse.Semester <= 2
-ORDER BY ProgramCourse.Semester;
+    course.course_code,
+    course.course_title,
+    program_course.recommended_semester
+FROM program_course
+INNER JOIN course ON course.course_code = program_course.course_code
+WHERE program_course.program_id = 'BSCS'
+  AND program_course.is_core = TRUE
+  AND program_course.recommended_semester <= 2
+ORDER BY program_course.recommended_semester;
+
+/*
+Merit list: rank all applicants for BSCS in Fall 2026 by aggregate score.
+*/
+SELECT
+    application.application_id,
+    applicant.full_name,
+    application.aggregate_score,
+    RANK() OVER (ORDER BY application.aggregate_score DESC) AS merit_rank
+FROM application
+INNER JOIN applicant ON applicant.applicant_id = application.applicant_id
+WHERE application.program_id = 'BSCS'
+  AND application.term_id    = 'T-F26'
+  AND application.status    <> 'Withdrawn';
+
+/*
+Which students are at risk of XF due to attendance below 80%?
+(A BEFORE UPDATE trigger auto-assigns XF once attendance drops under 75%;
+this query is the early-warning view.)
+*/
+SELECT
+    student.student_id,
+    student.full_name,
+    course.course_code,
+    enrollment.attendance_percentage
+FROM enrollment
+INNER JOIN student ON student.student_id = enrollment.student_id
+INNER JOIN section ON section.section_id = enrollment.section_id
+INNER JOIN course  ON course.course_code = section.course_code
+WHERE enrollment.attendance_percentage < 80.00
+ORDER BY enrollment.attendance_percentage ASC;
+
+/*
+Show all offers (and their statuses) for applicant AP006.
+*/
+SELECT
+    offer.offer_id,
+    application.program_id,
+    application.aggregate_score,
+    offer.status,
+    offer.expiry_date
+FROM offer
+INNER JOIN application ON application.application_id = offer.application_id
+WHERE application.applicant_id = 'AP006';

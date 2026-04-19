@@ -90,7 +90,7 @@ The database contains **15 entities** cleanly separated across two contextual pi
 
 The new schema has **no justified denormalizations**. The prior version kept `Student.ProgramID` for query-hot-path reasons; we removed it because one extra `JOIN Application` is cheap and the schema becomes more honest (and cannot drift).
 
-## 2. SQLite DDL Scripts
+## 2. MySQL DDL Scripts
 
 The full schema is implemented in [db/NUST.sql](db/NUST.sql). Core definitions:
 

@@ -22,7 +22,7 @@ The code acts as a robust backend API (`api.py`) and a modern React GUI (`fronte
 
 Directory / File | Description
 :--- | :---
-`db` | Contains the NUST database (`NUST.db`), its SQLite schema + seed script (`NUST.sql`), and the mermaid.js ERD (`ERD.mmd`).
+`db` | Contains the NUST MySQL schema + seed script (`NUST.sql`) and the mermaid.js ERD (`ERD.mmd`).
 `examples` | Contains SQL examples used for few-shot prompting (JSON format).
 `prompts` | Contains prompt templates for the LLM.
 `img` | Contains images.
@@ -32,11 +32,21 @@ Directory / File | Description
 `Assignment_1_Phase_1_2.md` | Phase 1 & 2 deliverable (requirements, ER design, DDL, normalization).
 `Assignment_2_Phase_3.md` | Phase 3 deliverable (complex queries, triggers, procedures, indexes, transactions).
 
-### Rebuilding `db/NUST.db`
-The SQLite database file is committed, but can be regenerated from the SQL script at any time:
+### Building the MySQL database
+The schema and seed data live in [db/NUST.sql](db/NUST.sql). Load it into a running MySQL 8.0+ instance:
 
 ```bash
-python -c "import sqlite3, os; os.path.exists('db/NUST.db') and os.remove('db/NUST.db'); sqlite3.connect('db/NUST.db').executescript(open('db/NUST.sql','r',encoding='utf-8').read())"
+mysql -u root -p < db/NUST.sql
+```
+
+The script starts with `DROP DATABASE IF EXISTS nust_university; CREATE DATABASE nust_university; USE nust_university;` so it is safe to rerun. Configure the API connection via environment variables:
+
+```dotenv
+MYSQL_HOST=localhost
+MYSQL_PORT=3306
+MYSQL_USER=root
+MYSQL_PASSWORD=your-password
+MYSQL_DB=nust_university
 ```
 
 ## Prerequisites
