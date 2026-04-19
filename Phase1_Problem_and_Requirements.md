@@ -99,3 +99,100 @@ The schema is intentionally **narrow in scope and deep in correctness** — 15 e
 | NFR-2 | The schema shall be in **3NF** with no justified denormalizations. |
 | NFR-3 | The seed script shall populate at least 10 meaningful rows per table and exercise every state in every enumerated `Status` column. |
 | NFR-4 | Rebuilding the database from `db/NUST.sql` shall be idempotent: the script shall start with `DROP DATABASE IF EXISTS` and end with a fully populated, fully constrained database in under five seconds on commodity hardware. |
+
+---
+
+## 3. RAG-Based Natural Language Interface
+
+### 3.1 Motivation
+
+Non-technical stakeholders — admissions officers, program coordinators, finance staff, and department heads — need quick answers from the database but cannot write SQL. Even technically literate users find it friction-heavy to mentally map a business question ("Which school had the highest conversion rate this intake?") onto the multi-join queries the normalized schema requires. A natural-language interface removes this barrier without sacrificing the integrity of the underlying relational model.
+
+### 3.2 What RAG adds to a SQL system
+
+Standard text-to-SQL approaches send the user's question and the raw schema directly to an LLM and ask it to produce a query. This works for simple schemas but fails in four recurring ways for a schema of our complexity:
+
+1. **Schema size.** Fifteen entities, dozens of columns, and a handful of views overload the context window if stuffed in verbatim.
+2. **Semantic gap.** Column names like `ApplicationID` or `FeeType` are concise for a DBA but ambiguous for a language model without surrounding business context.
+3. **Invariant blindness.** The LLM has no way to know that `Status='Completed' ⇒ Grade IS NOT NULL` or that the `XOR CHECK` on `Fee` splits payment rows into two logically distinct populations.
+4. **Hallucinated syntax.** Without grounding, the model may invent table or column names that do not exist.
+
+**Retrieval-Augmented Generation (RAG)** solves these by inserting a retrieval step between the user's question and the LLM. A vector store indexes rich, human-written descriptions of every table, column, view, stored procedure, trigger, and business rule. At query time the system embeds the question, retrieves the top-k most relevant chunks, and injects only those chunks into the prompt — giving the LLM precisely the context it needs, no more, no less.
+
+### 3.3 System architecture
+
+```
+User question
+      │
+      ▼
+ Embedding model (nomic-embed-text via Ollama)
+      │  produces query vector
+      ▼
+ FAISS vector store  ──retrieves top-k chunks──►  Schema + rule context
+      │
+      ▼
+ Prompt assembly
+ ┌──────────────────────────────────────────────┐
+ │  System: "You are a MySQL expert…"           │
+ │  Retrieved context: table/column docs        │
+ │  User question                               │
+ └──────────────────────────────────────────────┘
+      │
+      ▼
+ LLM (llama3.2 via Ollama)  ──generates──►  SQL query
+      │
+      ▼
+ MySQL 8.0 execution engine
+      │
+      ▼
+ Result rows  ──formatted──►  React frontend (table + chart)
+```
+
+The complete pipeline runs **locally**: both the embedding model and the LLM are served by Ollama on the user's machine, so no query text or database content leaves the institution's network.
+
+### 3.4 Knowledge base construction
+
+The vector store is built from a structured document corpus stored in `prompts/`. Each document chunk covers one coherent unit of schema knowledge:
+
+| Chunk type | Example content |
+| --- | --- |
+| Table overview | Entity name, purpose, primary key, cardinality with neighbours |
+| Column dictionary | Column name, data type, allowed values, business meaning |
+| Constraint annotation | Which CHECK/UNIQUE/trigger enforces which business rule |
+| View description | What each view joins and what questions it is designed to answer |
+| Procedure / function doc | Inputs, outputs, side-effects, and the workflow it automates |
+| Business-rule gloss | Plain-English statement of every invariant (XOR fee rule, capacity trigger, grade–status coupling) |
+| Sample Q&A pairs | Representative questions and the SQL they should produce |
+
+Chunks are embedded with `nomic-embed-text` (768-dimensional) and indexed in a FAISS flat-L2 store. The index is rebuilt whenever the schema or documentation changes.
+
+### 3.5 Retrieval strategy
+
+At query time:
+
+1. The user question is embedded with the same model used at index time.
+2. The top **5** nearest-neighbor chunks are retrieved (empirically sufficient; raising `k` improves coverage of multi-table questions at the cost of prompt length).
+3. Retrieved chunks are prepended to the prompt in descending similarity order so the LLM sees the most relevant context first.
+4. A fixed **system prompt** constrains the LLM to return only valid MySQL 8.0 syntax, to alias ambiguous column names, and to refuse questions that would require data not present in the schema.
+
+### 3.6 Functional requirements — RAG layer
+
+| # | Requirement |
+| --- | --- |
+| FR-31 | The system shall accept a free-text question from the user and return the SQL query, the raw result set, and a plain-English summary in a single API response. |
+| FR-32 | The system shall embed user questions using the same model (`nomic-embed-text`) used to build the index, so that distance metrics are comparable. |
+| FR-33 | The system shall retrieve the top-5 schema chunks most relevant to the user's question before generating SQL. |
+| FR-34 | The system shall pass retrieved context plus user question to a locally-hosted LLM (`llama3.2` via Ollama) and must not transmit any query content to external services. |
+| FR-35 | The system shall execute the generated SQL against the live `nust_university` database and return the result rows as JSON. |
+| FR-36 | The system shall display query results in the React frontend as a sortable table and, where the result is numeric, as a bar or pie chart. |
+| FR-37 | The system shall surface a clear error message when the LLM generates syntactically invalid SQL or when the query references a non-existent table or column, rather than silently returning an empty result. |
+| FR-38 | The system shall allow the knowledge base to be rebuilt by running a single script (`prompts/build_index.py`) without restarting the API server. |
+
+### 3.7 Non-functional requirements — RAG layer
+
+| # | Requirement |
+| --- | --- |
+| NFR-5 | End-to-end latency from question submission to displayed results shall be **under 30 seconds** on the reference hardware (8 GB RAM, no GPU) for queries requiring at most three joins. |
+| NFR-6 | The system shall run entirely **offline**: Ollama, the embedding model, the vector store, the API, and the frontend shall all operate without internet access after initial model download. |
+| NFR-7 | The FAISS index shall be **persisted to disk** so the retrieval store survives API server restarts without requiring re-embedding. |
+| NFR-8 | The system shall log each query, the retrieved chunk IDs, the generated SQL, and the row count returned, to support debugging and iterative improvement of the knowledge base. |
