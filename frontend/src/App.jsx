@@ -6,7 +6,7 @@ function App() {
     {
       role: 'ai',
       content:
-        "Hi! I'm your SQL database assistant. Ask me anything about the Chinook music store — artists, albums, tracks, customers, invoices, and more!",
+        "Hi! I'm your NUST University database assistant. Ask me anything about admissions, programs, students, courses, enrollments, fees, and more!",
     },
   ]);
   const [input, setInput] = useState('');
@@ -82,10 +82,10 @@ function App() {
   };
 
   const quickQuestions = [
-    'How many employees are there?',
-    "Which country's customers spent the most?",
-    "What fields are in the Album table?",
-    "What is the total price for the album 'Big Ones'?",
+    'Which program received the most applications?',
+    'List the top 5 applicants by NET score.',
+    'How many students are enrolled in each program?',
+    'What courses are offered in the BSCS program?',
   ];
 
   return (
