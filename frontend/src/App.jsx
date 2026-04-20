@@ -38,7 +38,7 @@ function App() {
     setIsLoading(true);
 
     try {
-      if (question.toLowerCase() === SCHEMA_QUESTION.toLowerCase()) {
+      if (/\bschema\b/i.test(question)) {
         const response = await fetch('/api/schema');
         if (!response.ok) {
           throw new Error(`Server error: ${response.status}`);
@@ -125,7 +125,7 @@ function App() {
             </svg>
           </div>
           <div>
-            <h1 className="header-title">SQL RAG</h1>
+            <h1 className="header-title">NUST DBS Agent</h1>
             <p className="header-subtitle">Chat with your Database · Powered by Ollama</p>
           </div>
         </div>
@@ -159,7 +159,7 @@ function App() {
 
                 {/* Content */}
                 <div className="message-content">
-                  <span className="message-label">{msg.role === 'ai' ? 'SQL RAG' : 'You'}</span>
+                  <span className="message-label">{msg.role === 'ai' ? 'NUST DBS Agent' : 'You'}</span>
                   <p className="message-text">{msg.content}</p>
 
                   {/* Steps toggle */}
@@ -218,7 +218,7 @@ function App() {
                   </svg>
                 </div>
                 <div className="message-content">
-                  <span className="message-label">SQL RAG</span>
+                  <span className="message-label">NUST DBS Agent</span>
                   <div className="typing-indicator">
                     <span></span>
                     <span></span>
