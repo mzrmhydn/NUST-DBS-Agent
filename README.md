@@ -34,7 +34,7 @@ A Retrieval-Augmented Generation (RAG) system that lets non-technical staff quer
 
 ## Overview
 
-This system wraps a MySQL university database with an AI agent that:
+This system wraps a custom MySQL university database with an AI agent running locally via Ollama that:
 
 - Converts natural language questions into valid SQL queries
 - Executes those queries against a live MySQL database
