@@ -109,7 +109,6 @@ function App() {
     'Which program received the most applications?',
     'List the top 5 applicants by NET score.',
     'How many students are enrolled in each program?',
-    'What courses are offered in the BSCS program?',
   ];
 
   return (
