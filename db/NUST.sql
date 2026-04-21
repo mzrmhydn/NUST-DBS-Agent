@@ -39,6 +39,7 @@ USE nust_university;
 SET NAMES utf8mb4;
 SET FOREIGN_KEY_CHECKS = 0;
 
+DROP PROCEDURE IF EXISTS transfer_student_to_section;
 DROP PROCEDURE IF EXISTS accept_admission;
 DROP FUNCTION  IF EXISTS is_eligible_for_engineering;
 DROP TRIGGER   IF EXISTS auto_update_application_status;
@@ -337,22 +338,83 @@ DELIMITER ;
 -- =============================================================================
 -- INDEXES
 -- =============================================================================
+-- Goal: cover every FK column that is not already the leftmost column of a PK
+-- or UNIQUE key. Each index carries a short note on the query pattern it
+-- accelerates. Seek-lookups on FK equality (JOIN and WHERE) are the dominant
+-- access pattern across this schema, so single-column BTree indexes are the
+-- right default; composite indexes are only used where a UNIQUE constraint
+-- already demands them.
 
+-- Accelerates "all faculty in a school" lookups used by HR dashboards and
+-- section-scheduling UIs that list candidate teachers for a course.
 CREATE INDEX idx_faculty_school         ON faculty(school_id);
+
+-- Accelerates "all programs offered by a school" reports that populate the
+-- program picker on admissions and prospectus pages.
 CREATE INDEX idx_program_school         ON program(school_id);
+
+-- Accelerates "all courses owned by a school" joins used to build the school's
+-- course catalogue view. Without this index every catalogue page would scan.
 CREATE INDEX idx_course_school          ON course(school_id);
+
+-- The PK leads with program_id, so lookups by course_code alone would scan the
+-- table. This reverse index is used when answering "which programs require
+-- course X?" — e.g., before deleting a course.
 CREATE INDEX idx_program_course_course  ON program_course(course_code);
+
+-- PK leads with course_code; this reverse index answers "what courses list X as
+-- a prerequisite?" which is used by degree-audit reports and course
+-- deprecation workflows.
 CREATE INDEX idx_prerequisite_prereq    ON prerequisite(prereq_course_code);
+
+-- Admissions queues filter heavily on status ('Pending','Selected',...). This
+-- index turns status-only scans into range seeks and is the #1 predicate used
+-- by the admissions dashboard.
 CREATE INDEX idx_application_status     ON application(status);
+
+-- UNIQUE(applicant_id, program_id, term_id) already covers applicant_id-led
+-- probes; this index accelerates "all applications for program X" seat-fill
+-- reports, where program_id alone is the predicate.
 CREATE INDEX idx_application_program    ON application(program_id);
+
+-- Accelerates "all applications for intake term X" queries used at the start
+-- of every admissions cycle to bulk-score that cohort.
 CREATE INDEX idx_application_term       ON application(term_id);
+
+-- PK leads with applicant_id; this reverse index answers "everyone who sat for
+-- test X" — used for score-distribution reports and publishing results.
 CREATE INDEX idx_test_attempt_test      ON test_attempt(test_id);
+
+-- Offer-status dashboards ("how many offers are still Issued vs Accepted?")
+-- filter on status. This index avoids a full scan of the offer table.
 CREATE INDEX idx_offer_status           ON offer(status);
+
+-- Accelerates "all students in program X" rosters used for academic audits and
+-- the auto_update_application_status trigger's matching logic.
 CREATE INDEX idx_student_program        ON student(program_id);
+
+-- UNIQUE(course_code, term_id, section_label) already covers course_code-led
+-- probes as its leftmost prefix, so this additional index is technically
+-- redundant for course_code-only lookups but is kept for explicit documentation
+-- of the FK access path (and to avoid optimizer surprises when the unique
+-- index is dropped or altered).
 CREATE INDEX idx_section_course         ON section(course_code);
+
+-- Accelerates "all sections running in term X" queries used to build the
+-- term's timetable and to drive classroom-utilization reports.
 CREATE INDEX idx_section_term           ON section(term_id);
+
+-- Accelerates "which sections use classroom X?" queries used by facilities
+-- management when a room goes offline for maintenance.
 CREATE INDEX idx_section_classroom      ON section(classroom_id);
+
+-- Accelerates "teaching load of faculty X" queries — used for workload
+-- reports and for detecting double-booked instructors.
 CREATE INDEX idx_section_faculty        ON section(faculty_id);
+
+-- PK leads with student_id; this reverse index answers "who is enrolled in
+-- section X?" — the dominant query for class rosters, grade submission, and
+-- the enforce_class_capacity trigger's COUNT(*).
 CREATE INDEX idx_enrollment_section     ON enrollment(section_id);
 
 -- =============================================================================
@@ -387,12 +449,11 @@ INSERT INTO faculty (faculty_id, school_id, full_name, email, designation) VALUE
 ('F011','ASAB' ,'Ayesha Tariq' ,'ayesha.tariq@asab.nust.edu.pk'  ,'Associate Professor'),
 ('F012','SCME' ,'Usman Ghadeer','usman.ghadeer@scme.nust.edu.pk' ,'Professor');
 
--- 3. program ----------------------------------------------------------------
+-- 3. program (Bachelor students only - no Masters/PhD) -------------------
 INSERT INTO program (program_id, school_id, program_name, degree_type, total_semesters, total_credits, total_seats) VALUES
 ('BSCS'  ,'SEECS','Computer Science'       ,'BS'    , 8,134,150),
 ('BESE'  ,'SEECS','Software Engineering'   ,'BE'    , 8,136,120),
 ('BEE'   ,'SEECS','Electrical Engineering' ,'BE'    , 8,136,120),
-('MSIS'  ,'SEECS','Information Security'   ,'MS'    , 4, 30, 40),
 ('BME'   ,'SMME' ,'Mechanical Engineering' ,'BE'    , 8,136,100),
 ('BIME'  ,'SMME' ,'Industrial Engineering' ,'BE'    , 8,136, 60),
 ('BBA'   ,'NBS'  ,'Business Administration','BBA'   , 8,132,120),
@@ -422,13 +483,16 @@ INSERT INTO course (course_code, school_id, course_title, course_type, credit_ho
 
 -- 5. prerequisite ----------------------------------------------------------
 INSERT INTO prerequisite (course_code, prereq_course_code) VALUES
-('CS212' ,'CS118'),
-('CS220' ,'CS212'),
-('CS330' ,'CS212'),
-('CS440' ,'CS220'),
-('SE310' ,'SE210'),
-('ME201' ,'ME101'),
-('FIN201','MGT101');
+('CS212' ,'CS118'),   -- OOP after Programming Fundamentals
+('CS220' ,'CS212'),   -- Databases after OOP
+('CS330' ,'CS212'),   -- Operating Systems after OOP
+('CS440' ,'CS220'),   -- Machine Learning after Databases
+('CS440' ,'CS330'),   -- Machine Learning also requires OS (systems background)
+('SE310' ,'SE210'),   -- Software Design after Requirements
+('SE310' ,'CS212'),   -- Software Design also requires OOP
+('SE310' ,'CS220'),   -- Software Design also requires Databases
+('ME201' ,'ME101'),   -- Thermodynamics after Engineering Mechanics
+('FIN201','MGT101');  -- Financial Accounting after Principles of Management
 
 -- 6. program_course  (M:N mapping: a course can appear in many programs) ---
 INSERT INTO program_course (program_id, course_code, recommended_semester, is_core) VALUES
@@ -519,36 +583,38 @@ INSERT INTO applicant (applicant_id, full_name, cnic, email, high_school_board, 
 ('A0014','Ahmed Raza'   ,'41303-4445556-4','ahmed.raza@test.com'   ,'FBISE'    , 790.00,115.00),
 ('A0015','Sara Khan'    ,'35202-5556667-5','sara.khan@test.com'    ,'AKU-EB'   , 890.00,130.00);
 
--- 10. entry_test ----------------------------------------------------------
+-- 10. entry_test (NETs by subject + intake year) ---------------------------
 INSERT INTO entry_test (test_id, test_type, test_date, total_marks) VALUES
-('T01','Engineering' ,'2024-12-15',200),  -- NET-1  (2025 intake)
-('T02','Engineering' ,'2025-02-20',200),  -- NET-2  (2025 intake)
-('T03','Engineering' ,'2025-04-10',200),  -- NET-3  (2025 intake)
-('T04','Business'    ,'2025-04-25',200),  -- NBS NET(2025 intake)
-('T05','Engineering' ,'2025-12-15',200),  -- NET-1  (2026 intake)
-('T06','Engineering' ,'2026-02-20',200),  -- NET-2  (2026 intake)
-('T07','Engineering' ,'2026-04-10',200),  -- NET-3  (2026 intake)
-('T08','Business'    ,'2026-04-25',200),  -- NBS NET(2026 intake)
-('T09','Architecture','2026-05-10',200),  -- SADA NET(2026 intake)
-('T10','Biosciences' ,'2026-05-20',200);  -- ASAB NET(2026 intake)
+('T01','Engineering' ,'2025-01-15',200),  -- NET-1 Engineering (2025 intake)
+('T02','Business'    ,'2025-02-20',200),  -- NET-2 Business    (2025 intake)
+('T03','Architecture','2025-03-15',200),  -- NET-3 Architecture(2025 intake)
+('T04','Biosciences' ,'2025-04-20',200),  -- NET-4 Biosciences (2025 intake)
+('T05','Engineering' ,'2026-01-15',200),  -- NET-1 Engineering (2026 intake)
+('T06','Business'    ,'2026-02-20',200),  -- NET-2 Business    (2026 intake)
+('T07','Architecture','2026-03-15',200),  -- NET-3 Architecture(2026 intake)
+('T08','Biosciences' ,'2026-04-20',200),  -- NET-4 Biosciences (2026 intake)
+('T09','Chemical'    ,'2025-05-10',200),  -- NET-5 Chemical    (2025 intake)
+('T10','Chemical'    ,'2026-05-10',200);  -- NET-5 Chemical    (2026 intake)
 
--- 11. test_attempt --------------------------------------------------------
+-- 11. test_attempt (every applicant's best_test_score equals MAX attempt) ---
 INSERT INTO test_attempt (applicant_id, test_id, score) VALUES
-('A0001','T02',145.00), ('A0001','T03',155.00),
-('A0002','T02',162.00), ('A0002','T03',168.00),
-('A0003','T01',135.00), ('A0003','T03',140.00),
-('A0004','T04',155.00),
-('A0005','T02',140.00), ('A0005','T03',138.00),
-('A0006','T08',125.00),
-('A0007','T06',172.00), ('A0007','T07',175.00),
-('A0008','T07',110.00),
-('A0009','T06',148.00), ('A0009','T07',152.00),
-('A0010','T06',142.00), ('A0010','T07',145.00),
-('A0011','T09',160.00),
-('A0012','T06',130.00), ('A0012','T07',125.00),
-('A0013','T10',155.00),
-('A0014','T07',115.00),
-('A0015','T08',130.00);
+-- 2025 intake (FA25)
+('A0001','T01',155.00),  -- BSCS, Engineering NET
+('A0002','T01',168.00),  -- BESE, Engineering NET
+('A0003','T01',140.00),  -- BME, Engineering NET
+('A0004','T02',155.00),  -- BBA, Business NET
+('A0005','T01',140.00),  -- BSCS, Engineering NET
+-- 2026 intake (FA26)
+('A0006','T06',125.00),  -- BSAF, Business NET
+('A0007','T05',175.00),  -- BESE, Engineering NET
+('A0008','T05',110.00),  -- BChemE, Engineering NET
+('A0009','T05',152.00),  -- BSCS, Engineering NET
+('A0010','T05',145.00),  -- BECE, Engineering NET
+('A0011','T07',160.00),  -- BArch, Architecture NET
+('A0012','T05',130.00),  -- BSCS, Engineering NET
+('A0013','T08',155.00),  -- BSAB, Biosciences NET
+('A0014','T05',115.00),  -- BME, Engineering NET
+('A0015','T06',130.00);  -- BBA, Business NET
 
 -- 12. application (20 rows) ------------------------------------------------
 -- Rows with status='Selected' will be auto-promoted to 'Enrolled' by the
@@ -748,6 +814,45 @@ BEGIN
     COMMIT;
 END //
 
+-- Procedure: move a student from one section to another within a term,
+-- preserving attendance_percentage. Demonstrates a multi-step transaction:
+-- read attendance -> delete old enrollment -> insert new enrollment. If the
+-- new section is full, enforce_class_capacity raises SIGNAL; the EXIT HANDLER
+-- ROLLBACKs the DELETE so the student is not left unregistered.
+CREATE PROCEDURE transfer_student_to_section(
+    IN p_student_id    VARCHAR(15),
+    IN p_from_section  VARCHAR(20),
+    IN p_to_section    VARCHAR(20)
+)
+BEGIN
+    DECLARE v_attendance DECIMAL(5,2);
+    DECLARE v_grade      ENUM('A','A-','B+','B','B-','C+','C','C-','D+','D','F');
+    DECLARE EXIT HANDLER FOR SQLEXCEPTION
+    BEGIN
+        ROLLBACK;
+        RESIGNAL;
+    END;
+
+    START TRANSACTION;
+
+    SELECT attendance_percentage, grade
+      INTO v_attendance, v_grade
+      FROM enrollment
+     WHERE student_id = p_student_id
+       AND section_id = p_from_section;
+
+    DELETE FROM enrollment
+     WHERE student_id = p_student_id
+       AND section_id = p_from_section;
+
+    INSERT INTO enrollment
+        (student_id, section_id, attendance_percentage, grade)
+    VALUES
+        (p_student_id, p_to_section, v_attendance, v_grade);
+
+    COMMIT;
+END //
+
 -- Function: is this applicant eligible for an Engineering program?
 -- Eligibility = scored >= 140 on at least one Engineering-type NET.
 CREATE FUNCTION is_eligible_for_engineering(p_applicant_id VARCHAR(15))
@@ -769,17 +874,21 @@ END //
 DELIMITER ;
 
 -- =============================================================================
--- TRANSACTION HANDLING EXAMPLE
+-- TRANSACTION HANDLING EXAMPLES
 -- =============================================================================
--- The block below demonstrates an explicit transaction from a client session.
--- It is commented out so rerunning NUST.sql does not mutate seed data;
--- uncomment to exercise it interactively against a fresh load of the schema.
+-- Two realistic multi-step transactions with ROLLBACK on failure. Both are
+-- commented out so rerunning NUST.sql does not mutate seed data; uncomment to
+-- exercise interactively against a fresh load of the schema.
 --
+-- -------------------------------------------------------------------------
+-- Example 1 — Admission acceptance (happy path + rollback on failure).
+-- -------------------------------------------------------------------------
 -- Business scenario: applicant Sara (application AP020, status='Selected')
 -- accepts her BBA offer. Inserting the student row fires
 -- auto_update_application_status, promoting AP020 to 'Enrolled' and flipping
--- OF012 to 'Accepted'. If the insert fails, the whole transaction rolls back —
--- no orphan Student, no drift in application / offer status.
+-- OF012 to 'Accepted'. If the insert fails (duplicate CNIC, orphan applicant,
+-- etc.) the whole transaction rolls back — no orphan student, no drift in
+-- application / offer status.
 --
 -- START TRANSACTION;
 --   INSERT INTO student
@@ -788,9 +897,41 @@ DELIMITER ;
 --   VALUES
 --     ('S011','BBA','A0015','Sara Khan',
 --      'sara.khan@student.nust.edu.pk',1,'2026-09-01');
+--
+--   -- If anything above raised, issue: ROLLBACK;
 -- COMMIT;
--- -- On any error: ROLLBACK;
 --
 -- Equivalent single-call form using the stored procedure above:
--- CALL accept_admission('S011','BBA','A0015','Sara Khan',
---                       'sara.khan@student.nust.edu.pk','2026-09-01');
+--   CALL accept_admission('S011','BBA','A0015','Sara Khan',
+--                         'sara.khan@student.nust.edu.pk','2026-09-01');
+--
+-- -------------------------------------------------------------------------
+-- Example 2 — Section transfer with capacity check (rollback demo).
+-- -------------------------------------------------------------------------
+-- Business scenario: student S001 wants to move from SEC010 (CS118, FA26)
+-- into a section that's already full. The INSERT will fire the
+-- enforce_class_capacity trigger, which raises SQLSTATE 45000. The DELETE of
+-- the old enrollment must then be undone so the student is not left without
+-- a seat in CS118. This is exactly what transfer_student_to_section's
+-- EXIT HANDLER does — but the raw statements are shown here for clarity:
+--
+-- START TRANSACTION;
+--   -- Capture current attendance so it is preserved across the move.
+--   SELECT attendance_percentage INTO @att
+--     FROM enrollment
+--    WHERE student_id = 'S001' AND section_id = 'SEC010';
+--
+--   DELETE FROM enrollment
+--    WHERE student_id = 'S001' AND section_id = 'SEC010';
+--
+--   -- If this INSERT raises (capacity reached, unknown section, etc.):
+--   --   ROLLBACK;  -- restores the DELETE above
+--   -- Otherwise:
+--   INSERT INTO enrollment
+--     (student_id, section_id, attendance_percentage, grade)
+--   VALUES
+--     ('S001','SEC011',@att,NULL);
+-- COMMIT;
+--
+-- Equivalent single-call form:
+--   CALL transfer_student_to_section('S001','SEC010','SEC011');
