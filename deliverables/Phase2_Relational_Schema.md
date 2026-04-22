@@ -4,7 +4,7 @@
 
 ## 1. ER Diagram Summary
 
-The ER diagram (see [db/ERD.mmd](db/ERD.mmd)) models 16 entities across two converging pipelines:
+The ER diagram models 16 entities across two converging pipelines:
 
 - **Admissions pipeline:** applicant → test_attempt → entry_test; applicant → application → offer → (student)
 - **Academic pipeline:** school → program / course / faculty; term → section ← classroom / faculty / course; student → enrollment → section
@@ -139,21 +139,7 @@ Underlines denote primary key attributes; italics denote foreign keys.
 
 ---
 
-## 3. Views (Derived Relations)
-
-**student_transcript** — virtual relation:
-> student_id, full_name, program_id, program_name, course_code, course_title, term_name, academic_year, grade, attendance_percentage
-
-Defined by joining: student ⋈ program ⋈ enrollment ⋈ section ⋈ course ⋈ term
-
-**classroom_utilization** — virtual relation:
-> classroom_id, building, room_number, capacity, sections_hosted
-
-Defined by: classroom LEFT JOIN section, grouped by classroom_id
-
----
-
-## 4. Entity-Relationship to Relational Mapping Summary
+## 3. Entity-Relationship to Relational Mapping Summary
 
 | ER Construct | Relational Mapping |
 |---|---|
@@ -176,7 +162,7 @@ Defined by: classroom LEFT JOIN section, grouped by classroom_id
 
 ---
 
-## 5. Integrity Constraints Summary
+## 4. Integrity Constraints Summary
 
 | Constraint | Location | Rule |
 |---|---|---|

@@ -6,9 +6,9 @@
 
 The National University of Sciences and Technology (NUST), Islamabad, manages a large and operationally critical database spanning undergraduate admissions, academic scheduling, faculty assignments, and student progress. Staff across the Registrar's Office, Admissions Directorate, and individual schools routinely need answers from this data: which applicants scored above a threshold, how many seats remain in a program, what the grade distribution for a course looks like, which classrooms are over-utilised.
 
-Currently, obtaining these answers requires either writing SQL queries directly against the MySQL database—a skill most administrative staff do not have—or waiting for IT to pull reports on request. Both paths are slow, error-prone, and create a bottleneck that imposes real cost on institutional decision-making.
+Currently, obtaining these answers requires either writing SQL queries directly against the MySQL database or waiting for IT to pull reports on request. Both paths are slow, error-prone, and create a bottleneck that imposes real cost on institutional decision-making. A natural-language interface removes this barrier without sacrificing the integrity of the underlying relational model.
 
-This project builds **NUST DBS Agent**: a natural-language SQL assistant that lets non-technical staff query the university database in plain English. A staff member types "Which applicants were rejected despite scoring above 140 on their NET?" and receives a concise, plain-English answer in seconds, with no SQL knowledge required. The system runs entirely on local infrastructure using an open-source LLM (Llama 3.1 via Ollama), so no sensitive student or admissions data leaves the university network.
+This project builds **NUST DBS Agent**: a natural-language SQL assistant that lets non-technical staff query the university database in plain English, and receive a concise, plain-English answer in seconds, with no SQL knowledge required. The system runs entirely on local infrastructure using an open-source LLM (Llama 3.1 via Ollama), so no sensitive student or admissions data leaves the university network.
 
 ---
 
@@ -27,7 +27,7 @@ NUST is organised into ten constituent schools (SEECS, SMME, NBS, SADA, NICE, S3
 Admission to NUST is competitive and follows a structured process:
 
 1. **Application:** A prospective student (**applicant**) submits an application to a specific program for a specific intake **term** (Fall/Spring/Summer of a given year).
-2. **Entry Test:** NUST administers the **NUST Entry Test (NET)**, held up to four times per year in multiple sittings, covering Engineering, CS, Business, Architecture, Biosciences, and Chemical streams. Each applicant may attempt multiple sittings; the best score is cached on the applicant record.
+2. **Entry Test:** NUST administers the **NUST Entry Test (NET)**, held up to four times per year in multiple sittings, covering Engineering, CS, and Business streams etc. Each applicant may attempt multiple sittings; the best score is cached on the applicant record.
 3. **Selection:** An **aggregate score** is computed from the applicant's high school result and best NET score. The application moves through statuses: Pending → Selected / Waitlisted / Rejected.
 4. **Offer:** A selected applicant receives a formal **admission offer** with an expiry date. The offer status tracks whether it was Accepted, Declined, or Expired.
 5. **Enrollment:** An applicant who accepts their offer becomes a **student**, triggering an automatic status promotion in both the application (→ Enrolled) and offer (→ Accepted) records.
@@ -57,19 +57,9 @@ The database covers:
 
 ---
 
-## 3. Stakeholders
+## 3. RAG-Based Natural Language Interface
 
-| Stakeholder | Typical Query |
-|-------------|--------------|
-| Admissions Officer | "How many applicants are waitlisted for BSCS this intake?" |
-| Registrar Staff | "What is the grade distribution for CS212 in Fall 2025?" |
-| Academic Advisor | "Which core courses has student S003 not yet completed?" |
-| School Management | "How many faculty does SEECS have, by designation?" |
-| Facility Manager | "Which classrooms are hosting more than two sections this term?" |
-
----
-
-## 4. Technical Context
+### 3.1 Technical Context
 
 The system is a **Retrieval-Augmented Generation (RAG) agent** with the following stack:
 
@@ -85,6 +75,83 @@ The system is a **Retrieval-Augmented Generation (RAG) agent** with the followin
 The agent follows a **ReAct loop**: it reasons about which tables to inspect, generates SQL, validates it with a query-checker tool, executes it, and then formulates a plain-English answer. Semantic few-shot examples (22 Q&A pairs stored in FAISS) are injected into the prompt when a close match is found, improving SQL accuracy without expanding the prompt for every query.
 
 All queries are strictly `SELECT`-only; no data modification is possible through the chat interface.
+
+---
+### 3.2 What RAG adds to a SQL system
+
+Standard text-to-SQL approaches send the user's question and the raw schema directly to an LLM and ask it to produce a query. This works for simple schemas but fails in four recurring ways for a schema of our complexity:
+
+1. **Schema size.** Sixteen entities, dozens of columns, and a handful of views overload the context window if stuffed in verbatim.
+2. **Semantic gap.** Column names like `application_id` or `is_core` are concise for a DBA but ambiguous for a language model without surrounding business context.
+3. **Invariant blindness.** The LLM has no way to know that `grade IS NULL` signals in-progress enrollment, or that `student.program_id` is a denormalized copy that bypasses `application`.
+4. **Hallucinated syntax.** Without grounding, the model may invent table or column names that do not exist.
+
+**Retrieval-Augmented Generation (RAG)** solves these by inserting a retrieval step between the user's question and the LLM. A vector store indexes rich, human-written descriptions of every table, column, view, stored procedure, trigger, and business rule. At query time the system embeds the question, retrieves the top-k most relevant chunks, and injects only those chunks into the prompt — giving the LLM precisely the context it needs, no more, no less.
+
+### 3.3 System architecture
+
+```
+User question
+      │
+      ▼
+ Embedding model (sentence-transformer, bundled in LangChain)
+      │  produces query vector
+      ▼
+ FAISS vector store  ──retrieves top-4 Q&A pairs──►  Few-shot example context
+ (built inline in api.py from examples/examples.json at startup)
+      │
+      ▼
+ Prompt assembly
+ ┌──────────────────────────────────────────────┐
+ │  System prompt (schema rules + SQL style)    │
+ │  Retrieved examples: 4 similar Q&A pairs     │
+ │  User question                               │
+ └──────────────────────────────────────────────┘
+      │
+      ▼
+ LLM (llama3.1 via Ollama)  ──generates──►  SQL query
+      │
+      ▼
+ MySQL 8.0 execution engine
+      │
+      ▼
+ Result rows  ──formatted──►  React frontend
+```
+
+The complete pipeline runs **locally**: the LLM is served by Ollama on the user's machine, so no query text or database content leaves the institution's network.
+
+### 3.4 Knowledge base construction
+
+The vector store is built **inline in `api.py`** at startup from a single JSON corpus: `examples/examples.json`. Each document is one question–SQL pair — the question text is embedded and the full pair is stored as retrieval context. The 22 Q&A pairs cover both pipelines:
+
+| Coverage area | Examples |
+| --- | --- |
+| Admissions queries | Applicant lookup, test score analysis, application status, offer lifecycle |
+| Academic queries | Program curriculum (`is_core`), prerequisite lookup, section staffing, enrollment grades |
+| Aggregate queries | School-level counts, program comparison, merit ranking |
+
+Documents are embedded with LangChain's default sentence-transformer-compatible model and indexed in a FAISS flat-L2 store. The index lives **in memory** and is rebuilt from scratch each time `api.py` starts — there is no separate build script or persist-to-disk step.
+
+### 3.5 Retrieval strategy
+
+At query time:
+
+1. The user question is embedded with the same model used at index time.
+2. The top **4** nearest-neighbor Q&A pairs are retrieved (empirically sufficient for the 22-pair corpus).
+3. Retrieved pairs are prepended to the prompt in descending similarity order so the LLM sees the most relevant examples first.
+4. A fixed **system prompt** constrains the LLM to return only valid MySQL 8.0 syntax, to use snake_case table and column names, and to refuse questions that would require data not present in the schema.
+
+---
+
+## 4. Stakeholders
+
+| Stakeholder | Typical Query |
+|-------------|--------------|
+| Admissions Officer | "How many applicants are waitlisted for BSCS this intake?" |
+| Registrar Staff | "What is the grade distribution for CS212 in Fall 2025?" |
+| Academic Advisor | "Which core courses has student S003 not yet completed?" |
+| School Management | "How many faculty does SEECS have, by designation?" |
+| Facility Manager | "Which classrooms are hosting more than two sections this term?" |
 
 ---
 

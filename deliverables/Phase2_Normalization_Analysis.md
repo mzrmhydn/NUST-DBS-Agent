@@ -329,7 +329,7 @@ Does `course_code → faculty_id`? No — the same course can be taught by diffe
 | section | ✓ | ✓ | ✓ | ✓ | |
 | enrollment | ✓ | ✓ | ✓ | ✓ | |
 
-**All 16 relations satisfy 3NF. All 16 relations also satisfy BCNF.**
+**All 16 relations satisfy 3NF. 15 of 16 relations are in BCNF. The one exception (`student`) is deliberately in 3NF with a documented and bounded cross-table denormalization.**
 
 The two acknowledged redundancies (`applicant.best_test_score` and `student.full_name / email`) are cross-relation denormalisations introduced for performance and query ergonomics, not intra-relation normal form violations.
 

@@ -91,7 +91,7 @@ Browser displays answer + collapsible reasoning trace
 
 2. *"Two database triggers: one enforces classroom capacity at enrollment time — the database itself rejects over-enrollments. The second trigger automatically promotes an application to Enrolled when a student record is created, keeping the admissions and academic pipelines in sync atomically."*
 
-> *"All 16 relations satisfy BCNF. The two acknowledged denormalisations — a cached best_test_score on applicant, and name/email copied to the student table — are deliberate trade-offs for query performance, not normal form violations."*
+> *"All 16 relations satisfy 3NF. The two acknowledged denormalisations — a cached best_test_score on applicant, and name/email copied to the student table — are deliberate trade-offs for query performance, not normal form violations."*
 
 ---
 

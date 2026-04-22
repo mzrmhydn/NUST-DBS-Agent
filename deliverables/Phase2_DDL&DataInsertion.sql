@@ -1,23 +1,9 @@
--- =============================================================================
--- NUST University Database - MySQL 8.0+ Schema + Seed Data
--- =============================================================================
+--NUST University Database
 
 DROP DATABASE IF EXISTS nust_university;
-CREATE DATABASE nust_university
-    CHARACTER SET utf8mb4
-    COLLATE utf8mb4_0900_ai_ci;
+CREATE DATABASE nust_university;
 USE nust_university;
 
-SET NAMES utf8mb4;
-SET FOREIGN_KEY_CHECKS = 0;
-
-DROP PROCEDURE IF EXISTS transfer_student_to_section;
-DROP PROCEDURE IF EXISTS accept_admission;
-DROP FUNCTION  IF EXISTS is_eligible_for_engineering;
-DROP TRIGGER   IF EXISTS auto_update_application_status;
-DROP TRIGGER   IF EXISTS enforce_class_capacity;
-DROP VIEW      IF EXISTS classroom_utilization;
-DROP VIEW      IF EXISTS student_transcript;
 DROP TABLE IF EXISTS enrollment;
 DROP TABLE IF EXISTS section;
 DROP TABLE IF EXISTS offer;
@@ -35,12 +21,6 @@ DROP TABLE IF EXISTS program;
 DROP TABLE IF EXISTS faculty;
 DROP TABLE IF EXISTS school;
 
-SET FOREIGN_KEY_CHECKS = 1;
-
--- =============================================================================
--- ADMINISTRATIVE STRUCTURE
--- =============================================================================
-
 CREATE TABLE school (
     school_id         VARCHAR(10)  NOT NULL,
     school_name       VARCHAR(150) NOT NULL,
@@ -49,7 +29,7 @@ CREATE TABLE school (
     PRIMARY KEY (school_id),
     UNIQUE KEY uq_school_name         (school_name),
     UNIQUE KEY uq_school_abbreviation (abbreviation)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+)
 
 CREATE TABLE faculty (
     faculty_id   VARCHAR(10)  NOT NULL,
@@ -60,7 +40,7 @@ CREATE TABLE faculty (
     PRIMARY KEY (faculty_id),
     UNIQUE KEY uq_faculty_email (email),
     FOREIGN KEY (school_id) REFERENCES school(school_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+)
 
 CREATE TABLE program (
     program_id       VARCHAR(15)  NOT NULL,
@@ -76,11 +56,7 @@ CREATE TABLE program (
     CONSTRAINT chk_program_credits   CHECK (total_credits   > 0),
     CONSTRAINT chk_program_seats     CHECK (total_seats     > 0),
     FOREIGN KEY (school_id) REFERENCES school(school_id) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
--- =============================================================================
--- COURSE CATALOGUE AND CURRICULUM
--- =============================================================================
+)
 
 CREATE TABLE course (
     course_code    VARCHAR(15)  NOT NULL,
@@ -93,10 +69,8 @@ CREATE TABLE course (
     CONSTRAINT chk_course_credit_hours  CHECK (credit_hours  BETWEEN 0 AND 6),
     CONSTRAINT chk_course_contact_hours CHECK (contact_hours BETWEEN 0 AND 10),
     FOREIGN KEY (school_id) REFERENCES school(school_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+)
 
--- Self-referential M:N on course (a course has many prereqs, and may itself
--- be a prereq of many other courses).
 CREATE TABLE prerequisite (
     course_code         VARCHAR(15) NOT NULL,
     prereq_course_code  VARCHAR(15) NOT NULL,
@@ -104,9 +78,8 @@ CREATE TABLE prerequisite (
     CONSTRAINT chk_prereq_not_self CHECK (course_code <> prereq_course_code),
     FOREIGN KEY (course_code)        REFERENCES course(course_code) ON DELETE CASCADE,
     FOREIGN KEY (prereq_course_code) REFERENCES course(course_code) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+)
 
--- Junction (with attrs): program M <-> M course
 CREATE TABLE program_course (
     program_id            VARCHAR(15) NOT NULL,
     course_code           VARCHAR(15) NOT NULL,
@@ -116,7 +89,7 @@ CREATE TABLE program_course (
     CONSTRAINT chk_pc_semester CHECK (recommended_semester BETWEEN 1 AND 14),
     FOREIGN KEY (program_id)  REFERENCES program(program_id)  ON DELETE CASCADE,
     FOREIGN KEY (course_code) REFERENCES course(course_code) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+)
 
 CREATE TABLE term (
     term_id        VARCHAR(15) NOT NULL,
@@ -127,7 +100,7 @@ CREATE TABLE term (
     PRIMARY KEY (term_id),
     UNIQUE KEY uq_term_name_year (term_name, academic_year),
     CONSTRAINT chk_term_dates CHECK (end_date > start_date)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+)
 
 CREATE TABLE classroom (
     classroom_id  VARCHAR(15) NOT NULL,
@@ -137,11 +110,7 @@ CREATE TABLE classroom (
     PRIMARY KEY (classroom_id),
     UNIQUE KEY uq_classroom_building_room (building, room_number),
     CONSTRAINT chk_classroom_capacity CHECK (capacity > 0)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
--- =============================================================================
--- ADMISSIONS PIPELINE
--- =============================================================================
+)
 
 CREATE TABLE applicant (
     applicant_id       VARCHAR(15)  NOT NULL,
@@ -156,7 +125,7 @@ CREATE TABLE applicant (
     UNIQUE KEY uq_applicant_email (email),
     CONSTRAINT chk_applicant_hs_score   CHECK (high_school_score BETWEEN 0 AND 1100),
     CONSTRAINT chk_applicant_test_score CHECK (best_test_score IS NULL OR best_test_score BETWEEN 0 AND 200)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+)
 
 CREATE TABLE entry_test (
     test_id       VARCHAR(15) NOT NULL,
@@ -169,9 +138,8 @@ CREATE TABLE entry_test (
     UNIQUE KEY uq_net_session (academic_year, net_number, test_type),
     CONSTRAINT chk_net_number       CHECK (net_number BETWEEN 1 AND 4),
     CONSTRAINT chk_test_total_marks CHECK (total_marks > 0)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+)
 
--- Junction: applicant M <-> M entry_test (an applicant takes each test at most once)
 CREATE TABLE test_attempt (
     applicant_id  VARCHAR(15)  NOT NULL,
     test_id       VARCHAR(15)  NOT NULL,
@@ -180,9 +148,8 @@ CREATE TABLE test_attempt (
     CONSTRAINT chk_attempt_score CHECK (score >= 0),
     FOREIGN KEY (applicant_id) REFERENCES applicant(applicant_id) ON DELETE CASCADE,
     FOREIGN KEY (test_id)      REFERENCES entry_test(test_id)     ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+)
 
--- Junction (with attrs): applicant M <-> M program, scoped by term.
 CREATE TABLE application (
     application_id      VARCHAR(15)  NOT NULL,
     applicant_id        VARCHAR(15)  NOT NULL,
@@ -198,9 +165,8 @@ CREATE TABLE application (
     FOREIGN KEY (applicant_id) REFERENCES applicant(applicant_id) ON DELETE CASCADE,
     FOREIGN KEY (program_id)   REFERENCES program(program_id)     ON DELETE CASCADE,
     FOREIGN KEY (term_id)      REFERENCES term(term_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+)
 
--- application 1 <-> 0..1 offer (at most one offer per application)
 CREATE TABLE offer (
     offer_id        VARCHAR(15) NOT NULL,
     application_id  VARCHAR(15) NOT NULL,
@@ -211,9 +177,8 @@ CREATE TABLE offer (
     UNIQUE KEY uq_offer_application (application_id),
     CONSTRAINT chk_offer_dates CHECK (expiry_date > issue_date),
     FOREIGN KEY (application_id) REFERENCES application(application_id) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+)
 
--- applicant 1 <-> 0..1 student; every student is also linked to their program.
 CREATE TABLE student (
     student_id        VARCHAR(15)  NOT NULL,
     program_id        VARCHAR(15)  NOT NULL,
@@ -230,10 +195,8 @@ CREATE TABLE student (
     CONSTRAINT chk_student_gpa      CHECK (gpa IS NULL OR gpa BETWEEN 0.00 AND 4.00),
     FOREIGN KEY (program_id)   REFERENCES program(program_id),
     FOREIGN KEY (applicant_id) REFERENCES applicant(applicant_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+)
 
--- A scheduled offering of a course, in a term, taught by a faculty member, in
--- a classroom. All four links are mandatory.
 CREATE TABLE section (
     section_id     VARCHAR(20) NOT NULL,
     course_code    VARCHAR(15) NOT NULL,
@@ -247,9 +210,8 @@ CREATE TABLE section (
     FOREIGN KEY (term_id)      REFERENCES term(term_id),
     FOREIGN KEY (classroom_id) REFERENCES classroom(classroom_id),
     FOREIGN KEY (faculty_id)   REFERENCES faculty(faculty_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+)
 
--- Junction: student M <-> M section. Grade is NULL while in progress.
 CREATE TABLE enrollment (
     student_id             VARCHAR(15)  NOT NULL,
     section_id             VARCHAR(20)  NOT NULL,
@@ -259,145 +221,13 @@ CREATE TABLE enrollment (
     CONSTRAINT chk_enrollment_attendance CHECK (attendance_percentage IS NULL OR attendance_percentage BETWEEN 0 AND 100),
     FOREIGN KEY (student_id) REFERENCES student(student_id),
     FOREIGN KEY (section_id) REFERENCES section(section_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+)
+
 
 -- =============================================================================
--- TRIGGERS
--- =============================================================================
 
-DELIMITER //
+-- SEED DATA (based on UG Student Handbook)
 
--- Reject enrollments that would exceed the hosting classroom's capacity.
-CREATE TRIGGER enforce_class_capacity
-BEFORE INSERT ON enrollment
-FOR EACH ROW
-BEGIN
-    DECLARE v_current_count INT;
-    DECLARE v_capacity      INT;
-
-    SELECT COUNT(*) INTO v_current_count
-      FROM enrollment
-     WHERE section_id = NEW.section_id;
-
-    SELECT c.capacity INTO v_capacity
-      FROM classroom c
-      JOIN section   s ON s.classroom_id = c.classroom_id
-     WHERE s.section_id = NEW.section_id;
-
-    IF v_current_count >= v_capacity THEN
-        SIGNAL SQLSTATE '45000'
-            SET MESSAGE_TEXT = 'Enrollment failed: classroom capacity reached.';
-    END IF;
-END //
-
--- When a student is inserted, promote their matching Selected application to
--- 'Enrolled' and flip the associated offer from 'Issued' to 'Accepted'. The
--- student is linked to the application through (applicant_id, program_id).
-CREATE TRIGGER auto_update_application_status
-AFTER INSERT ON student
-FOR EACH ROW
-BEGIN
-    UPDATE application
-       SET status = 'Enrolled'
-     WHERE applicant_id = NEW.applicant_id
-       AND program_id   = NEW.program_id
-       AND status       = 'Selected';
-
-    UPDATE offer o
-      JOIN application a ON a.application_id = o.application_id
-       SET o.status = 'Accepted'
-     WHERE a.applicant_id = NEW.applicant_id
-       AND a.program_id   = NEW.program_id
-       AND o.status       = 'Issued';
-END //
-
-DELIMITER ;
-
--- =============================================================================
--- INDEXES
--- =============================================================================
--- Goal: cover every FK column that is not already the leftmost column of a PK
--- or UNIQUE key. Each index carries a short note on the query pattern it
--- accelerates. Seek-lookups on FK equality (JOIN and WHERE) are the dominant
--- access pattern across this schema, so single-column BTree indexes are the
--- right default; composite indexes are only used where a UNIQUE constraint
--- already demands them.
-
--- Accelerates "all faculty in a school" lookups used by HR dashboards and
--- section-scheduling UIs that list candidate teachers for a course.
-CREATE INDEX idx_faculty_school         ON faculty(school_id);
-
--- Accelerates "all programs offered by a school" reports that populate the
--- program picker on admissions and prospectus pages.
-CREATE INDEX idx_program_school         ON program(school_id);
-
--- Accelerates "all courses owned by a school" joins used to build the school's
--- course catalogue view. Without this index every catalogue page would scan.
-CREATE INDEX idx_course_school          ON course(school_id);
-
--- The PK leads with program_id, so lookups by course_code alone would scan the
--- table. This reverse index is used when answering "which programs require
--- course X?" — e.g., before deleting a course.
-CREATE INDEX idx_program_course_course  ON program_course(course_code);
-
--- PK leads with course_code; this reverse index answers "what courses list X as
--- a prerequisite?" which is used by degree-audit reports and course
--- deprecation workflows.
-CREATE INDEX idx_prerequisite_prereq    ON prerequisite(prereq_course_code);
-
--- Admissions queues filter heavily on status ('Pending','Selected',...). This
--- index turns status-only scans into range seeks and is the #1 predicate used
--- by the admissions dashboard.
-CREATE INDEX idx_application_status     ON application(status);
-
--- UNIQUE(applicant_id, program_id, term_id) already covers applicant_id-led
--- probes; this index accelerates "all applications for program X" seat-fill
--- reports, where program_id alone is the predicate.
-CREATE INDEX idx_application_program    ON application(program_id);
-
--- Accelerates "all applications for intake term X" queries used at the start
--- of every admissions cycle to bulk-score that cohort.
-CREATE INDEX idx_application_term       ON application(term_id);
-
--- PK leads with applicant_id; this reverse index answers "everyone who sat for
--- test X" — used for score-distribution reports and publishing results.
-CREATE INDEX idx_test_attempt_test      ON test_attempt(test_id);
-
--- Offer-status dashboards ("how many offers are still Issued vs Accepted?")
--- filter on status. This index avoids a full scan of the offer table.
-CREATE INDEX idx_offer_status           ON offer(status);
-
--- Accelerates "all students in program X" rosters used for academic audits and
--- the auto_update_application_status trigger's matching logic.
-CREATE INDEX idx_student_program        ON student(program_id);
-
--- UNIQUE(course_code, term_id, section_label) already covers course_code-led
--- probes as its leftmost prefix, so this additional index is technically
--- redundant for course_code-only lookups but is kept for explicit documentation
--- of the FK access path (and to avoid optimizer surprises when the unique
--- index is dropped or altered).
-CREATE INDEX idx_section_course         ON section(course_code);
-
--- Accelerates "all sections running in term X" queries used to build the
--- term's timetable and to drive classroom-utilization reports.
-CREATE INDEX idx_section_term           ON section(term_id);
-
--- Accelerates "which sections use classroom X?" queries used by facilities
--- management when a room goes offline for maintenance.
-CREATE INDEX idx_section_classroom      ON section(classroom_id);
-
--- Accelerates "teaching load of faculty X" queries — used for workload
--- reports and for detecting double-booked instructors.
-CREATE INDEX idx_section_faculty        ON section(faculty_id);
-
--- PK leads with student_id; this reverse index answers "who is enrolled in
--- section X?" — the dominant query for class rosters, grade submission, and
--- the enforce_class_capacity trigger's COUNT(*).
-CREATE INDEX idx_enrollment_section     ON enrollment(section_id);
-
--- =============================================================================
--- SEED DATA
--- =============================================================================
 
 -- 1. school ------------------------------------------------------------------
 INSERT INTO school (school_id, school_name, abbreviation, established_year) VALUES
@@ -595,26 +425,24 @@ INSERT INTO entry_test (test_id, academic_year, net_number, test_type, test_date
 -- 11. test_attempt (every applicant's best_test_score equals MAX attempt) ---
 INSERT INTO test_attempt (applicant_id, test_id, score) VALUES
 -- 2025 intake (FA25)
-('A0001', 'T01', 155.00),  -- Engineering NET-1 2025
-('A0002', 'T01', 168.00),  -- Engineering NET-1 2025
-('A0003', 'T01', 140.00),  -- Engineering NET-1 2025
-('A0004', 'T02', 155.00),  -- Business NET-1 2025
-('A0005', 'T01', 140.00),  -- Engineering NET-1 2025
+('A0001', 'T01', 155.00),
+('A0002', 'T01', 168.00),
+('A0003', 'T01', 140.00),
+('A0004', 'T02', 155.00),
+('A0005', 'T01', 140.00),
 -- 2026 intake (FA26)
-('A0006', 'T13', 125.00),  -- Business NET-1 2026
-('A0007', 'T12', 175.00),  -- Engineering NET-1 2026
-('A0008', 'T12', 110.00),  -- Engineering NET-1 2026
-('A0009', 'T12', 152.00),  -- Engineering NET-1 2026
-('A0010', 'T12', 145.00),  -- Engineering NET-1 2026
-('A0011', 'T14', 160.00),  -- Architecture NET-1 2026
-('A0012', 'T12', 130.00),  -- Engineering NET-1 2026
-('A0013', 'T15', 155.00),  -- Biosciences NET-1 2026
-('A0014', 'T12', 115.00),  -- Engineering NET-1 2026
-('A0015', 'T13', 130.00);  -- Business NET-1 2026
+('A0006', 'T13', 125.00),
+('A0007', 'T12', 175.00),
+('A0008', 'T12', 110.00),
+('A0009', 'T12', 152.00),
+('A0010', 'T12', 145.00),
+('A0011', 'T14', 160.00),
+('A0012', 'T12', 130.00),
+('A0013', 'T15', 155.00),
+('A0014', 'T12', 115.00),
+('A0015', 'T13', 130.00);
 
 -- 12. application (20 rows) ------------------------------------------------
--- Rows with status='Selected' will be auto-promoted to 'Enrolled' by the
--- auto_update_application_status trigger once a matching student is inserted.
 INSERT INTO application (application_id, applicant_id, program_id, term_id, snapshot_hs_score, snapshot_best_test, aggregate_score, submission_date, status) VALUES
 ('AP001','A0001','BSCS'  ,'FA25', 980.00,155.00,75.50,'2025-07-01','Selected'),
 ('AP002','A0002','BESE'  ,'FA25',1010.00,168.00,83.10,'2025-07-01','Selected'),
@@ -638,10 +466,6 @@ INSERT INTO application (application_id, applicant_id, program_id, term_id, snap
 ('AP020','A0015','BBA'   ,'FA26', 890.00,130.00,66.80,'2026-07-18','Selected');
 
 -- 13. offer (12 rows — one per Selected application) ---------------------
--- All offers are seeded with status='Issued'. The student inserts below cause
--- auto_update_application_status to flip the matching offer to 'Accepted'.
--- Offers OF006 (Omar/BSAF) and OF012 (Sara/BBA) stay 'Issued' because no
--- student row is inserted for them in this seed.
 INSERT INTO offer (offer_id, application_id, issue_date, expiry_date, status) VALUES
 ('OF001','AP001','2025-07-20','2025-08-20','Issued'),
 ('OF002','AP002','2025-07-20','2025-08-20','Issued'),
@@ -657,12 +481,6 @@ INSERT INTO offer (offer_id, application_id, issue_date, expiry_date, status) VA
 ('OF012','AP020','2026-07-20','2026-08-20','Issued');
 
 -- 14. student (10 rows) --------------------------------------------------
--- Inserting a student fires auto_update_application_status, promoting the
--- matching application from 'Selected' to 'Enrolled' and the offer from
--- 'Issued' to 'Accepted'. Cohort 1 (FA25) students are now in current_semester=2;
--- Cohort 2 (FA26) students are starting current_semester=1.
--- gpa is computed from completed enrollment grades; NULL for students who
--- have no finalized grades yet (Cohort 2, still in their first semester).
 INSERT INTO student (student_id, program_id, applicant_id, full_name, email, current_semester, enrollment_date, gpa) VALUES
 ('S001','BSCS' ,'A0001','Ali Khan'    ,'ali.khan@student.nust.edu.pk'    ,2,'2025-09-01',3.67),
 ('S002','BESE' ,'A0002','Aisha Ahmed' ,'aisha.ahmed@student.nust.edu.pk' ,2,'2025-09-01',3.74),
@@ -699,7 +517,7 @@ INSERT INTO section (section_id, course_code, term_id, classroom_id, faculty_id,
 ('SEC017','CS440' ,'FA26','R03','F001','A');
 
 -- 16. enrollment ---------------------------------------------------------
--- Grade NULL = still in progress; grade set = section completed.
+-- Grade NULL = still in progress; grade set = enrollment completed.
 INSERT INTO enrollment (student_id, section_id, attendance_percentage, grade) VALUES
 -- Fall 2025 (completed)
 ('S001','SEC001',92.50,'A'),
@@ -734,202 +552,3 @@ INSERT INTO enrollment (student_id, section_id, attendance_percentage, grade) VA
 ('S003','SEC016',NULL,NULL),
 ('S008','SEC012',NULL,NULL),
 ('S006','SEC017',NULL,NULL);
-
--- =============================================================================
--- VIEWS
--- =============================================================================
-
--- Per-enrollment transcript row. The student carries program_id and
--- applicant_id directly, so the join graph is simpler than in a
--- fully-normalized variant that would reach them through application.
-CREATE VIEW student_transcript AS
-SELECT
-    s.student_id,
-    s.full_name,
-    pr.program_id,
-    pr.program_name,
-    c.course_code,
-    c.course_title,
-    t.term_name,
-    t.academic_year,
-    e.grade,
-    e.attendance_percentage
-FROM student     s
-JOIN program     pr  ON pr.program_id  = s.program_id
-JOIN enrollment  e   ON e.student_id   = s.student_id
-JOIN section     sec ON sec.section_id = e.section_id
-JOIN course      c   ON c.course_code  = sec.course_code
-JOIN term        t   ON t.term_id      = sec.term_id;
-
--- Per-classroom occupancy: how many scheduled sections each room hosts
--- across every term.
-CREATE VIEW classroom_utilization AS
-SELECT
-    cr.classroom_id,
-    cr.building,
-    cr.room_number,
-    cr.capacity,
-    COUNT(sec.section_id) AS sections_hosted
-FROM classroom cr
-LEFT JOIN section sec ON sec.classroom_id = cr.classroom_id
-GROUP BY cr.classroom_id, cr.building, cr.room_number, cr.capacity;
-
--- =============================================================================
--- STORED PROCEDURES AND FUNCTIONS
--- =============================================================================
-
-DELIMITER //
-
--- Procedure: atomically accept an admission offer by inserting the student
--- row. The auto_update_application_status trigger promotes the matching
--- application from 'Selected' to 'Enrolled' and flips the offer from 'Issued'
--- to 'Accepted'. The whole thing is wrapped in a transaction; any failure
--- rolls back.
-CREATE PROCEDURE accept_admission(
-    IN p_student_id       VARCHAR(15),
-    IN p_program_id       VARCHAR(15),
-    IN p_applicant_id     VARCHAR(15),
-    IN p_full_name        VARCHAR(100),
-    IN p_email            VARCHAR(100),
-    IN p_enrollment_date  DATE
-)
-BEGIN
-    DECLARE EXIT HANDLER FOR SQLEXCEPTION
-    BEGIN
-        ROLLBACK;
-        RESIGNAL;
-    END;
-
-    START TRANSACTION;
-
-    INSERT INTO student
-        (student_id, program_id, applicant_id, full_name, email,
-         current_semester, enrollment_date, gpa)
-    VALUES
-        (p_student_id, p_program_id, p_applicant_id, p_full_name, p_email,
-         1, p_enrollment_date, NULL);
-
-    COMMIT;
-END //
-
--- Procedure: move a student from one section to another within a term,
--- preserving attendance_percentage. Demonstrates a multi-step transaction:
--- read attendance -> delete old enrollment -> insert new enrollment. If the
--- new section is full, enforce_class_capacity raises SIGNAL; the EXIT HANDLER
--- ROLLBACKs the DELETE so the student is not left unregistered.
-CREATE PROCEDURE transfer_student_to_section(
-    IN p_student_id    VARCHAR(15),
-    IN p_from_section  VARCHAR(20),
-    IN p_to_section    VARCHAR(20)
-)
-BEGIN
-    DECLARE v_attendance DECIMAL(5,2);
-    DECLARE v_grade      ENUM('A','A-','B+','B','B-','C+','C','C-','D+','D','F');
-    DECLARE EXIT HANDLER FOR SQLEXCEPTION
-    BEGIN
-        ROLLBACK;
-        RESIGNAL;
-    END;
-
-    START TRANSACTION;
-
-    SELECT attendance_percentage, grade
-      INTO v_attendance, v_grade
-      FROM enrollment
-     WHERE student_id = p_student_id
-       AND section_id = p_from_section;
-
-    DELETE FROM enrollment
-     WHERE student_id = p_student_id
-       AND section_id = p_from_section;
-
-    INSERT INTO enrollment
-        (student_id, section_id, attendance_percentage, grade)
-    VALUES
-        (p_student_id, p_to_section, v_attendance, v_grade);
-
-    COMMIT;
-END //
-
--- Function: is this applicant eligible for an Engineering program?
--- Eligibility = scored >= 140 on at least one Engineering-type NET.
-CREATE FUNCTION is_eligible_for_engineering(p_applicant_id VARCHAR(15))
-RETURNS BOOLEAN
-READS SQL DATA
-DETERMINISTIC
-BEGIN
-    DECLARE v_max_score DECIMAL(5,2);
-
-    SELECT MAX(ta.score) INTO v_max_score
-      FROM test_attempt ta
-      JOIN entry_test et ON et.test_id = ta.test_id
-     WHERE ta.applicant_id = p_applicant_id
-       AND et.test_type    = 'Engineering';
-
-    RETURN (v_max_score >= 140);
-END //
-
-DELIMITER ;
-
--- =============================================================================
--- TRANSACTION HANDLING EXAMPLES
--- =============================================================================
--- Two realistic multi-step transactions with ROLLBACK on failure. Both are
--- commented out so rerunning NUST.sql does not mutate seed data; uncomment to
--- exercise interactively against a fresh load of the schema.
---
--- -------------------------------------------------------------------------
--- Example 1 — Admission acceptance (happy path + rollback on failure).
--- -------------------------------------------------------------------------
--- Business scenario: applicant Sara (application AP020, status='Selected')
--- accepts her BBA offer. Inserting the student row fires
--- auto_update_application_status, promoting AP020 to 'Enrolled' and flipping
--- OF012 to 'Accepted'. If the insert fails (duplicate CNIC, orphan applicant,
--- etc.) the whole transaction rolls back — no orphan student, no drift in
--- application / offer status.
---
--- START TRANSACTION;
---   INSERT INTO student
---     (student_id, program_id, applicant_id, full_name, email,
---      current_semester, enrollment_date, gpa)
---   VALUES
---     ('S011','BBA','A0015','Sara Khan',
---      'sara.khan@student.nust.edu.pk',1,'2026-09-01',NULL);
---
---   -- If anything above raised, issue: ROLLBACK;
--- COMMIT;
---
--- Equivalent single-call form using the stored procedure above:
---   CALL accept_admission('S011','BBA','A0015','Sara Khan',
---                         'sara.khan@student.nust.edu.pk','2026-09-01');
---
--- -------------------------------------------------------------------------
--- Example 2 — Section transfer with capacity check (rollback demo).
--- -------------------------------------------------------------------------
--- Business scenario: student S001 wants to move from SEC010 (CS118, FA26)
--- into a section that's already full. The INSERT will fire the
--- enforce_class_capacity trigger, which raises SQLSTATE 45000. The DELETE of
--- the old enrollment must then be undone so the student is not left without
--- a seat in CS118. This is exactly what transfer_student_to_section's
--- EXIT HANDLER does — but the raw statements are shown here for clarity:
---
--- START TRANSACTION;
---   -- Capture current attendance so it is preserved across the move.
---   SELECT attendance_percentage INTO @att
---     FROM enrollment
---    WHERE student_id = 'S001' AND section_id = 'SEC010';
---
---   DELETE FROM enrollment
---    WHERE student_id = 'S001' AND section_id = 'SEC010';
---
---   -- If this INSERT raises (capacity reached, unknown section, etc.):
---   --   ROLLBACK;  -- restores the DELETE above
---   -- Otherwise:
---   INSERT INTO enrollment
---     (student_id, section_id, attendance_percentage, grade)
---   VALUES
---     ('S001','SEC011',@att,NULL);
--- COMMIT;
---
--- Equivalent single-call form:
---   CALL transfer_student_to_section('S001','SEC010','SEC011');
