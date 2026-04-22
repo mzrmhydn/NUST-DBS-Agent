@@ -29,7 +29,7 @@ CREATE TABLE school (
     PRIMARY KEY (school_id),
     UNIQUE KEY uq_school_name         (school_name),
     UNIQUE KEY uq_school_abbreviation (abbreviation)
-)
+);
 
 CREATE TABLE faculty (
     faculty_id   VARCHAR(10)  NOT NULL,
@@ -40,7 +40,7 @@ CREATE TABLE faculty (
     PRIMARY KEY (faculty_id),
     UNIQUE KEY uq_faculty_email (email),
     FOREIGN KEY (school_id) REFERENCES school(school_id)
-)
+);
 
 CREATE TABLE program (
     program_id       VARCHAR(15)  NOT NULL,
@@ -56,7 +56,7 @@ CREATE TABLE program (
     CONSTRAINT chk_program_credits   CHECK (total_credits   > 0),
     CONSTRAINT chk_program_seats     CHECK (total_seats     > 0),
     FOREIGN KEY (school_id) REFERENCES school(school_id) ON DELETE CASCADE
-)
+);
 
 CREATE TABLE course (
     course_code    VARCHAR(15)  NOT NULL,
@@ -69,7 +69,7 @@ CREATE TABLE course (
     CONSTRAINT chk_course_credit_hours  CHECK (credit_hours  BETWEEN 0 AND 6),
     CONSTRAINT chk_course_contact_hours CHECK (contact_hours BETWEEN 0 AND 10),
     FOREIGN KEY (school_id) REFERENCES school(school_id)
-)
+);
 
 CREATE TABLE prerequisite (
     course_code         VARCHAR(15) NOT NULL,
@@ -78,7 +78,7 @@ CREATE TABLE prerequisite (
     CONSTRAINT chk_prereq_not_self CHECK (course_code <> prereq_course_code),
     FOREIGN KEY (course_code)        REFERENCES course(course_code) ON DELETE CASCADE,
     FOREIGN KEY (prereq_course_code) REFERENCES course(course_code) ON DELETE CASCADE
-)
+);
 
 CREATE TABLE program_course (
     program_id            VARCHAR(15) NOT NULL,
@@ -89,7 +89,7 @@ CREATE TABLE program_course (
     CONSTRAINT chk_pc_semester CHECK (recommended_semester BETWEEN 1 AND 14),
     FOREIGN KEY (program_id)  REFERENCES program(program_id)  ON DELETE CASCADE,
     FOREIGN KEY (course_code) REFERENCES course(course_code) ON DELETE CASCADE
-)
+);
 
 CREATE TABLE term (
     term_id        VARCHAR(15) NOT NULL,
@@ -100,7 +100,7 @@ CREATE TABLE term (
     PRIMARY KEY (term_id),
     UNIQUE KEY uq_term_name_year (term_name, academic_year),
     CONSTRAINT chk_term_dates CHECK (end_date > start_date)
-)
+);
 
 CREATE TABLE classroom (
     classroom_id  VARCHAR(15) NOT NULL,
@@ -110,7 +110,7 @@ CREATE TABLE classroom (
     PRIMARY KEY (classroom_id),
     UNIQUE KEY uq_classroom_building_room (building, room_number),
     CONSTRAINT chk_classroom_capacity CHECK (capacity > 0)
-)
+);
 
 CREATE TABLE applicant (
     applicant_id       VARCHAR(15)  NOT NULL,
@@ -125,7 +125,7 @@ CREATE TABLE applicant (
     UNIQUE KEY uq_applicant_email (email),
     CONSTRAINT chk_applicant_hs_score   CHECK (high_school_score BETWEEN 0 AND 1100),
     CONSTRAINT chk_applicant_test_score CHECK (best_test_score IS NULL OR best_test_score BETWEEN 0 AND 200)
-)
+);
 
 CREATE TABLE entry_test (
     test_id       VARCHAR(15) NOT NULL,
@@ -138,7 +138,7 @@ CREATE TABLE entry_test (
     UNIQUE KEY uq_net_session (academic_year, net_number, test_type),
     CONSTRAINT chk_net_number       CHECK (net_number BETWEEN 1 AND 4),
     CONSTRAINT chk_test_total_marks CHECK (total_marks > 0)
-)
+);
 
 CREATE TABLE test_attempt (
     applicant_id  VARCHAR(15)  NOT NULL,
@@ -148,7 +148,7 @@ CREATE TABLE test_attempt (
     CONSTRAINT chk_attempt_score CHECK (score >= 0),
     FOREIGN KEY (applicant_id) REFERENCES applicant(applicant_id) ON DELETE CASCADE,
     FOREIGN KEY (test_id)      REFERENCES entry_test(test_id)     ON DELETE CASCADE
-)
+);
 
 CREATE TABLE application (
     application_id      VARCHAR(15)  NOT NULL,
@@ -165,7 +165,7 @@ CREATE TABLE application (
     FOREIGN KEY (applicant_id) REFERENCES applicant(applicant_id) ON DELETE CASCADE,
     FOREIGN KEY (program_id)   REFERENCES program(program_id)     ON DELETE CASCADE,
     FOREIGN KEY (term_id)      REFERENCES term(term_id)
-)
+);
 
 CREATE TABLE offer (
     offer_id        VARCHAR(15) NOT NULL,
@@ -177,7 +177,7 @@ CREATE TABLE offer (
     UNIQUE KEY uq_offer_application (application_id),
     CONSTRAINT chk_offer_dates CHECK (expiry_date > issue_date),
     FOREIGN KEY (application_id) REFERENCES application(application_id) ON DELETE CASCADE
-)
+);
 
 CREATE TABLE student (
     student_id        VARCHAR(15)  NOT NULL,
@@ -195,7 +195,7 @@ CREATE TABLE student (
     CONSTRAINT chk_student_gpa      CHECK (gpa IS NULL OR gpa BETWEEN 0.00 AND 4.00),
     FOREIGN KEY (program_id)   REFERENCES program(program_id),
     FOREIGN KEY (applicant_id) REFERENCES applicant(applicant_id)
-)
+);
 
 CREATE TABLE section (
     section_id     VARCHAR(20) NOT NULL,
@@ -210,7 +210,7 @@ CREATE TABLE section (
     FOREIGN KEY (term_id)      REFERENCES term(term_id),
     FOREIGN KEY (classroom_id) REFERENCES classroom(classroom_id),
     FOREIGN KEY (faculty_id)   REFERENCES faculty(faculty_id)
-)
+);
 
 CREATE TABLE enrollment (
     student_id             VARCHAR(15)  NOT NULL,
@@ -221,7 +221,7 @@ CREATE TABLE enrollment (
     CONSTRAINT chk_enrollment_attendance CHECK (attendance_percentage IS NULL OR attendance_percentage BETWEEN 0 AND 100),
     FOREIGN KEY (student_id) REFERENCES student(student_id),
     FOREIGN KEY (section_id) REFERENCES section(section_id)
-)
+);
 
 
 -- =============================================================================
