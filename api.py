@@ -20,7 +20,6 @@ from langchain_community.utilities import SQLDatabase
 from langchain_community.vectorstores import FAISS
 from langchain_core.example_selectors import SemanticSimilarityExampleSelector
 from langchain_core.messages import SystemMessage
-from langchain_core.prompts import PromptTemplate
 from langchain_ollama import ChatOllama, OllamaEmbeddings
 from langgraph.prebuilt import create_react_agent
 from pydantic import BaseModel
@@ -123,6 +122,26 @@ def _strip_pipe_tables(text: str) -> str:
     return "\n".join(kept)
 
 
+def all_sql_queries_failed(steps: list[dict]) -> bool:
+    """Return True if the agent attempted sql_db_query at least once and every
+    attempt came back as an error. In that case the model's final answer is
+    invariably fabricated — small local models ignore tool errors and invent
+    rows, so we suppress their answer rather than show nonsense to the user.
+    """
+    attempts = 0
+    successes = 0
+    for step in steps:
+        if step.get("type") != "ToolMessage":
+            continue
+        if step.get("tool_name") != "sql_db_query":
+            continue
+        attempts += 1
+        content = (step.get("content") or "").strip()
+        if not content.startswith("Error"):
+            successes += 1
+    return attempts > 0 and successes == 0
+
+
 def sanitize_final_answer(text: str) -> str:
     """Remove reasoning artifacts that leak into the final AIMessage.
 
@@ -177,13 +196,13 @@ def startup():
     tools = toolkit.get_tools()
     print("OK")
 
-    system_prompt = PromptTemplate.from_file(
-        template_file="prompts/system-prompt-template.txt"
-    )
+    # Read the template explicitly as UTF-8. PromptTemplate.from_file uses the
+    # system codepage on Windows (cp1252), which mojibakes em-dashes in the
+    # few-shot examples — the model then echoes "â€" back to the user.
+    with open("prompts/system-prompt-template.txt", encoding="utf-8") as f:
+        system_prompt_text = f.read()
     system_message = SystemMessage(
-        content=system_prompt.format(
-            schema=database.get_table_info()
-        )
+        content=system_prompt_text.format(schema=database.get_table_info())
     )
 
     print("Creating agent...", end=" ", flush=True)
@@ -251,6 +270,13 @@ def ask_question(req: QuestionRequest):
         if content and not tool_calls:
             if msg_type == "AIMessage":
                 final_answer = content
+
+    if all_sql_queries_failed(steps):
+        final_answer = (
+            "I couldn't run a valid query against the database for that "
+            "question — every SQL attempt came back with an error. Please try "
+            "rephrasing, or ask for the database schema and try again."
+        )
 
     return AnswerResponse(
         answer=sanitize_final_answer(final_answer),

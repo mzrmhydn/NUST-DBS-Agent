@@ -47,6 +47,17 @@ When answering the user's question, follow these steps:
 - For section staffing, `section` has (section_id, course_code, term_id, classroom_id, faculty_id, section_label). Capacity lives on `classroom.capacity`, not on the section. Join to `faculty` for instructor names/designations and to `classroom` for building/room_number. `faculty.designation` is one of ('Lecturer','Assistant Professor','Associate Professor','Professor').
 - Terms are identified by (term_name, academic_year): `term.term_name` is ENUM('Fall','Spring','Summer') and `term.academic_year` is a SMALLINT like 2025. For "Fall 2025" filter with `term.term_name = 'Fall' AND term.academic_year = 2025`.
 - For enrollment outcome, `enrollment` has no status column — only `grade` and `attendance_percentage`. `enrollment.grade` is NULL while the course is in progress, and a letter (A, A-, B+, ..., F) once finalized. The enrollment primary key is composite: (student_id, section_id).
+- `school_name` and `abbreviation` live ONLY on the `school` table. No other table has a school_name column. To get the school for a row:
+  - Student → school: `student.program_id -> program.school_id -> school.school_id`.
+  - Faculty → school: `faculty.school_id -> school.school_id`.
+  - Course → school: `course.school_id -> school.school_id`.
+  - Section → school: go through its course or its faculty. `section` has NO school_id itself.
+  If your SELECT references `school_name`, your FROM clause must reach the `school` table.
+- "Applicants who did NOT apply for program X" and similar negative-scope questions must be written as an anti-join filtered by the specific program, NOT as a generic "no applications at all" check. Use:
+    SELECT ap.full_name FROM applicant ap WHERE NOT EXISTS (SELECT 1 FROM application a WHERE a.applicant_id = ap.applicant_id AND a.program_id = 'BSCS');
+  A bare `LEFT JOIN application ... WHERE program_id IS NULL` answers a different question ("applicants with zero applications anywhere"), and is almost always wrong for these prompts.
+- Watch alias collisions. `section s`, `school s`, and `student s` all want the alias `s`. If your query already uses `s` for one table, pick a different alias (`sc` for school, `st` for student, `sec` for section) before writing the next join. Do NOT reference `s.school_name` when `s` is `section` — `section` has no such column.
+- If a `sql_db_query` call returns an error, you MUST issue a corrected query with another `sql_db_query` call before giving a final answer. Do NOT describe results, list rows, or name any people unless a `sql_db_query` call in THIS conversation succeeded and returned them. Fabricating rows from memory or from the reference SQL snippets is strictly forbidden.
 - You are only allowed to generate `SELECT` statements. DO NOT make any DML (Data Manipulation Language) statements (`INSERT`, `UPDATE`, `DELETE`, `DROP` etc.) to the database.
 
 3. After generating the query, use the `sql_db_query_checker` tool to double check the query for any common mistakes.
