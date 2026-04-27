@@ -1,4 +1,6 @@
 .claude/
+deliverables/
+db/ERD.mmd
 
 # Secrets / environment
 .env
